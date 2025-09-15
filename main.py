@@ -12,7 +12,7 @@ import sys
 from models.schemas import VideoRequest, VideoResponse, VideoData
 from services.youtube_service import YouTubeService
 from services.whisper_service import WhisperService
-from services.persistent_session_manager import PersistentSessionManager
+from services.background_browser import BackgroundBrowser
 from middleware.auth import verify_token
 
 # Carregar variáveis de ambiente
@@ -51,7 +51,7 @@ app.add_middleware(
 )
 
 # Variáveis globais para serviços
-session_manager = None
+background_browser = None
 youtube_service = None
 whisper_service = None
 
@@ -68,15 +68,15 @@ _shutdown_event = asyncio.Event()
 
 async def graceful_shutdown():
     """Shutdown gracioso da aplicação"""
-    global session_manager, youtube_service, whisper_service
+    global background_browser, youtube_service, whisper_service
     
     logger.info("🛑 Iniciando shutdown gracioso...")
     
     try:
-        # Encerrar sessão persistente
-        if session_manager:
-            logger.info("🍪 Encerrando sessão persistente...")
-            await session_manager.shutdown()
+        # Parar navegador em background
+        if background_browser:
+            logger.info("🤖 Parando navegador em background...")
+            await background_browser.stop()
         
         # Encerrar WhisperService
         if whisper_service:
@@ -104,10 +104,10 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 @app.on_event("startup")
 async def startup_event():
-    """Inicialização da aplicação com sessão persistente"""
-    global session_manager, youtube_service, whisper_service
+    """Inicialização da aplicação com navegador em background"""
+    global background_browser, youtube_service, whisper_service
     
-    logger.info("🚀 Iniciando YouTube Transcription API v3.0 (Sessão Persistente)...")
+    logger.info("🚀 Iniciando YouTube Transcription API v4.0 (Background Browser)...")
 
     # Verificar variáveis obrigatórias
     api_token = os.getenv("API_TOKEN")
@@ -121,54 +121,42 @@ async def startup_event():
         raise RuntimeError("OPENAI_API_KEY é obrigatório")
 
     try:
-        # Inicializar WhisperService primeiro
+        # Inicializar WhisperService
         logger.info("🎤 Inicializando WhisperService...")
         whisper_service = WhisperService()
         
-        # Inicializar Gerenciador de Sessão Persistente
+        # Inicializar Navegador em Background
         if PERSISTENT_SESSION_ENABLED:
-            logger.info("🎭 Inicializando sessão persistente do navegador...")
-            session_manager = PersistentSessionManager()
+            logger.info("🤖 Inicializando navegador em background...")
+            background_browser = BackgroundBrowser()
             
-            # Inicializar e aguardar sessão estar pronta
-            session_ready = await session_manager.initialize()
+            # Inicializar navegador background
+            browser_ready = await background_browser.start()
             
-            if session_ready:
-                logger.info("✅ Sessão persistente inicializada com sucesso!")
-                # Iniciar tasks em background se ainda não foram iniciados
-                if hasattr(session_manager, '_start_background_tasks'):
-                    session_manager._start_background_tasks()
+            if browser_ready:
+                logger.info("✅ Navegador em background ativo!")
+                logger.info("🔄 Refresh automático a cada 10s iniciado")
             else:
-                logger.warning("⚠️ Falha na sessão persistente, usando modo fallback com cookies existentes...")
-                # Verificar se temos cookies válidos para o modo fallback
-                if os.path.exists("cookies.txt"):
-                    with open("cookies.txt", 'r') as f:
-                        cookie_content = f.read()
-                        if 'LOGIN_INFO' in cookie_content and 'SAPISID' in cookie_content:
-                            logger.info("🍪 Cookies de autenticação encontrados - modo fallback funcional")
-                        else:
-                            logger.warning("⚠️ Cookies podem estar desatualizados")
-                else:
-                    logger.warning("⚠️ Nenhum arquivo de cookies encontrado")
-                session_manager = None
+                logger.warning("⚠️ Falha no navegador background, usando modo tradicional...")
+                background_browser = None
         else:
-            logger.info("🔄 Modo sessão persistente desabilitado")
-            session_manager = None
+            logger.info("🔄 Modo navegador em background desabilitado")
+            background_browser = None
         
-        # Inicializar YouTubeService
-        youtube_service = YouTubeService(session_manager=session_manager)
+        # Inicializar YouTubeService sem session_manager
+        youtube_service = YouTubeService(session_manager=None)
         
         # Log de status final
-        if session_manager:
-            session_status = await session_manager.get_session_status()
-            logger.info(f"📊 Status da sessão: {session_status}")
+        if background_browser:
+            browser_status = background_browser.get_status()
+            logger.info(f"🤖 Status do navegador background: {browser_status}")
         
         logger.info("✅ API inicializada com sucesso!")
 
     except Exception as e:
         logger.error(f"❌ Erro crítico na inicialização: {e}")
-        if session_manager:
-            await session_manager.shutdown()
+        if background_browser:
+            await background_browser.stop()
         raise RuntimeError(f"Falha na inicialização: {e}")
 
 @app.on_event("shutdown")
@@ -179,19 +167,19 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """Endpoint raiz - Health check"""
-    session_info = {}
-    if session_manager:
+    browser_info = {}
+    if background_browser:
         try:
-            session_info = await session_manager.get_session_status()
+            browser_info = background_browser.get_status()
         except Exception:
-            session_info = {"error": "Status não disponível"}
+            browser_info = {"error": "Status não disponível"}
     
     return {
-        "message": "YouTube Video Transcription API - Persistent Session",
+        "message": "YouTube Video Transcription API - Background Browser",
         "status": "running",
-        "version": "3.0.0",
-        "persistent_session_enabled": PERSISTENT_SESSION_ENABLED,
-        "session_info": session_info
+        "version": "4.0.0",
+        "background_browser_enabled": PERSISTENT_SESSION_ENABLED,
+        "browser_info": browser_info
     }
 
 @app.get("/health")
@@ -200,8 +188,8 @@ async def health_check():
     try:
         health_status = {
             "status": "healthy",
-            "version": "3.0.0",
-            "persistent_session": {
+            "version": "4.0.0",
+            "background_browser": {
                 "enabled": PERSISTENT_SESSION_ENABLED,
                 "active": False,
                 "details": {}
@@ -212,14 +200,14 @@ async def health_check():
             }
         }
         
-        # Verificar status da sessão persistente
-        if session_manager:
+        # Verificar status do navegador em background
+        if background_browser:
             try:
-                session_status = await session_manager.get_session_status()
-                health_status["persistent_session"]["active"] = session_status.get("is_active", False)
-                health_status["persistent_session"]["details"] = session_status
+                browser_status = background_browser.get_status()
+                health_status["background_browser"]["active"] = browser_status.get("is_running", False)
+                health_status["background_browser"]["details"] = browser_status
             except Exception as e:
-                health_status["persistent_session"]["error"] = str(e)
+                health_status["background_browser"]["error"] = str(e)
         
         return health_status
         
@@ -227,123 +215,39 @@ async def health_check():
         logger.warning(f"⚠️ Erro no health check: {e}")
         return {"status": "degraded", "error": str(e)}
 
-@app.get("/session/status")
-async def get_session_status(
+@app.get("/browser/status")
+async def get_browser_status(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    """Status detalhado da sessão persistente"""
+    """Status detalhado do navegador em background"""
     try:
         verify_token(credentials.credentials)
         
-        if not session_manager:
+        if not background_browser:
             return {
                 "success": False,
-                "message": "Sessão persistente não está ativa",
-                "persistent_session_enabled": PERSISTENT_SESSION_ENABLED
+                "message": "Navegador em background não está ativo",
+                "background_browser_enabled": PERSISTENT_SESSION_ENABLED
             }
         
-        session_status = await session_manager.get_session_status()
-        detailed_status = await session_manager.get_detailed_status()
+        browser_status = background_browser.get_status()
         
         return {
             "success": True,
-            "session_status": session_status,
-            "detailed_status": detailed_status
+            "browser_status": browser_status,
+            "message": "Navegador rodando em background com refresh automático"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Erro ao obter status da sessão: {e}")
+        logger.error(f"❌ Erro ao obter status do navegador: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao obter status da sessão: {str(e)}"
+            detail=f"Erro ao obter status do navegador: {str(e)}"
         )
 
-@app.post("/session/refresh")
-async def refresh_session(
-    force: bool = False,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """Força refresh da sessão persistente"""
-    try:
-        verify_token(credentials.credentials)
-        
-        if not session_manager:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Sessão persistente não está ativa"
-            )
-        
-        logger.info(f"🔄 Refresh da sessão solicitado (force={force})")
-        
-        if force:
-            success = await session_manager.force_refresh()
-        else:
-            success = await session_manager.refresh_cookies()
-        
-        session_status = await session_manager.get_session_status()
-        
-        return {
-            "success": success,
-            "message": "Sessão atualizada com sucesso" if success else "Falha na atualização",
-            "session_status": session_status
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erro ao refresh sessão: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao refresh sessão: {str(e)}"
-        )
-
-@app.post("/cookies/update")
-async def update_cookies(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """Endpoint específico para atualizar cookies"""
-    try:
-        verify_token(credentials.credentials)
-        
-        if not session_manager:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Sessão persistente não está ativa"
-            )
-        
-        logger.info("🍪 Atualização de cookies solicitada...")
-        
-        # Força uma nova navegação e extração de cookies
-        success = await session_manager.force_refresh()
-        
-        if success:
-            session_status = await session_manager.get_session_status()
-            logger.info("✅ Cookies atualizados com sucesso!")
-            
-            return {
-                "success": True,
-                "message": "Cookies atualizados com sucesso",
-                "refresh_count": session_status.get("refresh_count", 0),
-                "last_cookie_update": session_status.get("last_cookie_update"),
-                "session_active": session_status.get("is_active", False)
-            }
-        else:
-            logger.warning("⚠️ Falha na atualização dos cookies")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Falha na atualização dos cookies"
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erro ao atualizar cookies: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao atualizar cookies: {str(e)}"
-        )
+# Endpoints de refresh removidos - navegador em background faz refresh automático
 
 @app.post("/video/getData", response_model=VideoResponse)
 async def get_video_data(
@@ -351,7 +255,7 @@ async def get_video_data(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     """
-    Endpoint principal para transcrever vídeos com sessão persistente ativa
+    Endpoint principal para transcrever vídeos com navegador em background
 
     Args:
         request: Lista de URLs de vídeos do YouTube
@@ -375,25 +279,14 @@ async def get_video_data(
                 detail=f"Máximo de {MAX_VIDEOS_PER_REQUEST} vídeos por requisição.",
             )
 
-        logger.info("📝 Processando %d vídeo(s) com sessão persistente...", len(request.video_urls))
-
-        # Refresh da sessão antes do processamento
-        if session_manager:
-            logger.info("🔄 Atualizando sessão antes do processamento...")
-            refresh_success = await session_manager.refresh_cookies()
-            if not refresh_success:
-                logger.warning("⚠️ Falha no refresh da sessão, tentando continuar...")
+        logger.info("📝 Processando %d vídeo(s) com cookies sempre atualizados...", len(request.video_urls))
 
         video_data_list: List[VideoData] = []
 
-        # Processamento sequencial com refresh entre vídeos
+        # Processamento sequencial simples - cookies sempre frescos do background browser
         for i, video_url in enumerate(request.video_urls, 1):
             try:
                 logger.info("🎬 Processando vídeo %d/%d: %s", i, len(request.video_urls), video_url)
-
-                # Refresh da sessão a cada vídeo (para manter ativa)
-                if session_manager and i > 1:
-                    await session_manager.light_refresh()
 
                 # Download do áudio
                 audio_path, video_title = await youtube_service.download_audio(video_url)
