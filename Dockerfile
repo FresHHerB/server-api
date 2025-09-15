@@ -91,7 +91,10 @@ RUN python3.11 -m playwright install-deps && \
 RUN mkdir -p /app/logs \
              /app/temp \
              /app/browser_profile \
+             /app/crashpad \
+             /tmp/chrome-crashpad \
              /ms-playwright && \
+    chmod 777 /tmp/chrome-crashpad && \
     chown -R appuser:appuser /app /ms-playwright
 
 # Copiar código da aplicação

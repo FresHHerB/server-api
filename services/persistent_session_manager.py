@@ -66,61 +66,74 @@ class PersistentSessionManager:
                 # Inicializar Playwright
                 self.playwright = await async_playwright().start()
                 
-                # Configurações do navegador com stealth para Docker
+                # Configurações do navegador otimizadas para Docker (SOLUÇÃO CRASHPAD)
                 browser_args = [
+                    # Segurança e sandbox
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
+                    
+                    # GPU e renderização
                     '--disable-gpu',
                     '--disable-software-rasterizer',
+                    '--disable-gpu-sandbox',
+                    
+                    # SOLUÇÃO CRASHPAD - desabilitar completamente
+                    '--disable-crashpad',
+                    '--disable-crash-reporter', 
+                    '--disable-breakpad',
+                    '--no-crash-upload',
+                    '--crash-dumps-dir=/tmp/chrome-crashpad',
+                    
+                    # Core features
                     '--disable-web-security',
                     '--disable-features=VizDisplayCompositor',
                     '--disable-blink-features=AutomationControlled',
                     '--disable-extensions',
                     '--no-first-run',
                     '--disable-default-apps',
+                    
+                    # Background processes
                     '--disable-background-timer-throttling',
                     '--disable-renderer-backgrounding',
                     '--disable-backgrounding-occluded-windows',
+                    '--disable-background-networking',
+                    
+                    # Security and privacy
                     '--disable-client-side-phishing-detection',
                     '--disable-sync',
                     '--disable-translate',
+                    
+                    # UI elements
                     '--hide-scrollbars',
                     '--mute-audio',
+                    '--disable-infobars',
+                    
+                    # System integration
                     '--no-zygote',
                     '--disable-ipc-flooding-protection',
                     '--disable-component-update',
                     '--disable-domain-reliability',
-                    '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+                    '--disable-features=TranslateUI,BlinkGenPropertyTrees,MediaRouter',
                     '--no-default-browser-check',
-                    # Correções específicas para Docker/container
-                    '--disable-crash-reporter',
-                    '--disable-breakpad',
-                    '--disable-logging',
+                    
+                    # Development and debugging
                     '--disable-dev-tools',
-                    '--disable-gpu-sandbox',
-                    '--disable-software-rasterizer',
-                    '--disable-background-networking',
-                    '--disable-default-apps',
-                    '--disable-extensions',
-                    '--disable-features=MediaRouter',
+                    '--disable-logging',
+                    '--log-level=3',
+                    
+                    # Permissions and prompts  
                     '--disable-hang-monitor',
                     '--disable-popup-blocking',
                     '--disable-prompt-on-repost',
-                    '--disable-sync',
-                    '--disable-web-security',
-                    '--no-default-browser-check',
-                    '--no-first-run',
-                    '--disable-features=VizDisplayCompositor',
-                    # Limitar uso de recursos
+                    
+                    # Memory and performance
                     '--memory-pressure-off',
                     '--max_old_space_size=4096',
                     '--disable-field-trial-config',
-                    # Garantir que o crashpad não cause problemas
-                    '--disable-crash-reporter',
-                    '--crash-dumps-dir=/tmp',
-                    '--enable-logging=stderr',
-                    '--log-level=3'
+                    
+                    # Disable problematic features
+                    '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees'
                 ]
                 
                 # Usar contexto persistente
@@ -196,8 +209,9 @@ class PersistentSessionManager:
                 self.session_start_time = datetime.now()
                 self.last_activity = datetime.now()
                 
-                # Iniciar tasks em background
-                self._start_background_tasks()
+                # NAVEGADOR NUNCA FECHA - não iniciar tasks que podem interferir
+                # self._start_background_tasks() # Desabilitado para manter navegador sempre aberto
+                logger.info("🔒 Navegador configurado para NUNCA fechar - modo persistente simples")
                 
                 logger.info("✅ Sessão persistente inicializada com sucesso!")
                 return True
@@ -223,22 +237,27 @@ class PersistentSessionManager:
             # Inicializar Playwright novamente
             self.playwright = await async_playwright().start()
             
-            # Argumentos mais conservadores
+            # Argumentos mais conservadores com solução crashpad
             minimal_args = [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
                 '--headless=new',
+                # SOLUÇÃO CRASHPAD
+                '--disable-crashpad',
                 '--disable-crash-reporter',
                 '--disable-breakpad',
+                '--no-crash-upload',
+                '--crash-dumps-dir=/tmp/chrome-crashpad',
+                # Outros
                 '--disable-logging',
                 '--no-first-run',
                 '--disable-default-apps',
                 '--disable-extensions',
                 '--disable-background-networking',
                 '--disable-sync',
-                '--crash-dumps-dir=/tmp'
+                '--log-level=3'
             ]
             
             # Usar browser normal em vez de contexto persistente
@@ -357,39 +376,39 @@ class PersistentSessionManager:
             logger.debug(f"Erro em atividade simulada: {e}")
 
     async def refresh_cookies(self) -> bool:
-        """Refresh manual de cookies"""
-        async with self._lock:
-            if not self.is_active or not self.page:
-                logger.warning("⚠️ Sessão não está ativa para refresh")
+        """Refresh simples - recarregar página e coletar cookies"""
+        if not self.is_active or not self.page:
+            logger.warning("⚠️ Sessão não está ativa para refresh")
+            return False
+            
+        try:
+            logger.info("🔄 Refresh simples de cookies...")
+            
+            # Apenas recarregar a página do YouTube
+            await self.page.goto("https://www.youtube.com", timeout=30000, wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(2000)
+            
+            # Movimento simples do mouse
+            await self.page.mouse.move(500, 400)
+            await self.page.wait_for_timeout(500)
+            
+            # Extrair e salvar cookies
+            success = await self._extract_and_save_cookies()
+            
+            if success:
+                self.last_activity = datetime.now()
+                self.last_cookie_update = datetime.now()
+                self.refresh_count += 1
+                logger.info(f"✅ Cookies atualizados simples (#{self.refresh_count})")
+                return True
+            else:
+                logger.warning("⚠️ Falha ao extrair cookies")
                 return False
                 
-            try:
-                logger.info("🔄 Fazendo refresh de cookies...")
-                
-                # Reload da página
-                await self.page.reload(wait_until="domcontentloaded")
-                await self.page.wait_for_timeout(2000)
-                
-                # Atividade leve
-                await self.page.mouse.move(300, 300)
-                await self.page.wait_for_timeout(1000)
-                
-                # Extrair cookies atualizados
-                success = await self._extract_and_save_cookies()
-                
-                if success:
-                    self.last_activity = datetime.now()
-                    self.last_cookie_update = datetime.now()
-                    self.refresh_count += 1
-                    logger.info(f"✅ Cookies atualizados (refresh #{self.refresh_count})")
-                    return True
-                else:
-                    logger.warning("⚠️ Falha ao atualizar cookies")
-                    return False
-                    
-            except Exception as e:
-                logger.error(f"❌ Erro no refresh de cookies: {e}")
-                return False
+        except Exception as e:
+            logger.error(f"❌ Erro no refresh simples: {e}")
+            # NÃO fechar o navegador em caso de erro
+            return False
 
     async def light_refresh(self) -> bool:
         """Refresh leve apenas com movimento do mouse"""
@@ -410,35 +429,40 @@ class PersistentSessionManager:
             return False
 
     async def force_refresh(self) -> bool:
-        """Refresh forçado com nova navegação"""
-        async with self._lock:
-            if not self.is_active or not self.page:
+        """Refresh forçado - nunca fecha navegador"""
+        if not self.is_active or not self.page:
+            logger.warning("⚠️ Navegador não está ativo")
+            return False
+            
+        try:
+            logger.info("🔄 Refresh forçado - mantendo navegador aberto...")
+            
+            # Navegar para YouTube novamente
+            await self.page.goto("https://www.youtube.com", timeout=45000, wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(3000)
+            
+            # Atividade simulada simples
+            await self.page.mouse.move(400, 300)
+            await self.page.wait_for_timeout(1000)
+            await self.page.mouse.move(600, 450)
+            await self.page.wait_for_timeout(1000)
+            
+            # Extrair cookies
+            success = await self._extract_and_save_cookies()
+            
+            if success:
+                self.last_activity = datetime.now()
+                self.last_cookie_update = datetime.now()
+                self.refresh_count += 1
+                logger.info(f"✅ Refresh forçado #{self.refresh_count} - navegador permanece aberto")
+                return True
+            else:
+                logger.warning("⚠️ Falha na extração de cookies, mas navegador permanece aberto")
                 return False
                 
-            try:
-                logger.info("🔄 Fazendo refresh forçado...")
-                
-                # Nova navegação
-                await self.page.goto("https://www.youtube.com", 
-                                     timeout=60000, 
-                                     wait_until="domcontentloaded")
-                
-                # Atividade simulada
-                await self._simulate_natural_activity()
-                
-                # Extrair cookies
-                success = await self._extract_and_save_cookies()
-                
-                if success:
-                    self.last_activity = datetime.now()
-                    self.last_cookie_update = datetime.now()
-                    self.refresh_count += 1
-                    logger.info("✅ Refresh forçado bem-sucedido")
-                    return True
-                    
-            except Exception as e:
-                logger.error(f"❌ Erro no refresh forçado: {e}")
-                
+        except Exception as e:
+            logger.error(f"❌ Erro no refresh forçado: {e}")
+            logger.info("🔒 Navegador permanece aberto mesmo com erro")
             return False
 
     async def _extract_and_save_cookies(self) -> bool:
@@ -639,13 +663,10 @@ class PersistentSessionManager:
                 await asyncio.sleep(60)
 
     async def _renew_session(self) -> bool:
-        """Renova completamente a sessão"""
-        logger.info("🔄 Renovando sessão...")
-        
-        await self._cleanup_session()
-        await asyncio.sleep(2)
-        
-        return await self.initialize()
+        """Sessão não renova - mantém navegador sempre aberto"""
+        logger.warning("⚠️ Renovação desabilitada - navegador permanece sempre aberto")
+        # Apenas tentar refresh simples
+        return await self.refresh_cookies()
 
     async def get_session_status(self) -> Dict:
         """Retorna status da sessão"""
@@ -721,6 +742,6 @@ class PersistentSessionManager:
             logger.warning(f"⚠️ Erro na limpeza da sessão: {e}")
 
     async def shutdown(self):
-        """Shutdown completo do gerenciador"""
-        logger.info("🛑 Encerrando gerenciador de sessão persistente...")
-        await self._cleanup_session()
+        """Shutdown - apenas logs, navegador permanece até fim do container"""
+        logger.info("🛑 Shutdown solicitado - navegador permanecerá ativo até fim do container")
+        # Não chama _cleanup_session para manter navegador aberto
