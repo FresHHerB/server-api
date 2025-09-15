@@ -286,6 +286,52 @@ async def refresh_session(
             detail=f"Erro ao refresh sessão: {str(e)}"
         )
 
+@app.post("/cookies/update")
+async def update_cookies(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Endpoint específico para atualizar cookies"""
+    try:
+        verify_token(credentials.credentials)
+        
+        if not session_manager:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Sessão persistente não está ativa"
+            )
+        
+        logger.info("🍪 Atualização de cookies solicitada...")
+        
+        # Força uma nova navegação e extração de cookies
+        success = await session_manager.force_refresh()
+        
+        if success:
+            session_status = await session_manager.get_session_status()
+            logger.info("✅ Cookies atualizados com sucesso!")
+            
+            return {
+                "success": True,
+                "message": "Cookies atualizados com sucesso",
+                "refresh_count": session_status.get("refresh_count", 0),
+                "last_cookie_update": session_status.get("last_cookie_update"),
+                "session_active": session_status.get("is_active", False)
+            }
+        else:
+            logger.warning("⚠️ Falha na atualização dos cookies")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Falha na atualização dos cookies"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro ao atualizar cookies: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao atualizar cookies: {str(e)}"
+        )
+
 @app.post("/video/getData", response_model=VideoResponse)
 async def get_video_data(
     request: VideoRequest,

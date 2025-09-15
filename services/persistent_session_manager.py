@@ -134,8 +134,33 @@ class PersistentSessionManager:
                 else:
                     self.page = await self.context.new_page()
                 
-                # Aplicar stealth
+                # Aplicar stealth com configurações avançadas
                 await stealth_async(self.page)
+                
+                # Configurações adicionais de stealth
+                await self.page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined,
+                    });
+                    
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5],
+                    });
+                    
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+                    });
+                    
+                    window.chrome = {
+                        runtime: {},
+                    };
+                    
+                    Object.defineProperty(navigator, 'permissions', {
+                        get: () => ({
+                            query: () => Promise.resolve({ state: 'granted' }),
+                        }),
+                    });
+                """)
                 
                 # Carregar cookies existentes
                 await self._load_initial_cookies()

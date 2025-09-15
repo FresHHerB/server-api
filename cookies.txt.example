@@ -1,0 +1,7 @@
+# Netscape HTTP Cookie File
+# http://curl.haxx.se/rfc/cookie_spec.html
+# Este arquivo será automaticamente preenchido pela sessão persistente
+# DO NOT EDIT MANUALLY - será sobrescrito automaticamente
+
+# Formato: domain	include_subdomains	path	secure	expires	name	value
+# Exemplo: .youtube.com	TRUE	/	TRUE	1234567890	COOKIE_NAME	COOKIE_VALUE

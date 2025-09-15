@@ -57,15 +57,18 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y && \
     apt-get update && \
     apt-get install -y \
         python3.11 \
-        python3.11-pip \
         python3.11-dev \
         python3.11-venv \
         python3.11-distutils \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Criar links simbólicos para Python
 RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# Instalar pip para Python 3.11
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
 
 # Atualizar pip
 RUN python3.11 -m pip install --upgrade pip setuptools wheel
@@ -82,7 +85,7 @@ RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
 # Instalar Playwright e browsers de forma robusta
 RUN python3.11 -m playwright install-deps && \
-    python3.11 -m playwright install chromium
+    python3.11 -m playwright install chromium --with-deps
 
 # Criar diretórios necessários com permissões corretas
 RUN mkdir -p /app/logs \
@@ -94,12 +97,23 @@ RUN mkdir -p /app/logs \
 # Copiar código da aplicação
 COPY --chown=appuser:appuser . .
 
+# Criar arquivo cookies.txt se não existir
+RUN if [ ! -f cookies.txt ]; then \
+    echo "# Netscape HTTP Cookie File" > cookies.txt && \
+    echo "# Este arquivo será automaticamente preenchido pela sessão persistente" >> cookies.txt && \
+    chown appuser:appuser cookies.txt; \
+    fi
+
 # Mudar para usuário não-root
 USER appuser
 
 # Configurar variáveis de ambiente para Playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    DISPLAY=:99
+    DISPLAY=:99 \
+    PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW=1 \
+    CHROME_BIN=/ms-playwright/chromium-*/chrome-linux/chrome \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-*/chrome-linux/chrome
 
 # Expor porta
 EXPOSE 8000
