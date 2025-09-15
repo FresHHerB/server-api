@@ -80,8 +80,12 @@ class WhisperService:
                 logger.debug(f"Response content: {response.text[:200]}...")
                 
                 # Para response_format='text', a resposta é diretamente o texto
-                if self.model == "whisper-1" and data.get('response_format') == 'text':
+                logger.debug(f"Model: '{self.model}', Response format: '{data.get('response_format')}'")
+                
+                if data.get('response_format') == 'text':
+                    # Resposta é texto puro
                     transcription = response.text.strip()
+                    logger.info(f"📝 Recebido texto da OpenAI: {len(transcription)} caracteres")
                     if not transcription:
                         logger.warning("⚠️ OpenAI retornou texto vazio")
                         return ""
@@ -92,7 +96,7 @@ class WhisperService:
                         transcription = result.get('text', '').strip()
                     except ValueError as json_error:
                         logger.error(f"❌ Erro ao parsear JSON da OpenAI: {json_error}")
-                        logger.error(f"Response content: {response.text}")
+                        logger.error(f"Response content: {response.text[:200]}...")
                         return ""
 
                 char_count = len(transcription)
