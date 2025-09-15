@@ -50,56 +50,122 @@ class PersistentSessionManager:
         try:
             logger.info("🚀 Inicializando navegador SIMPLES...")
             
-            # Playwright simples
-            self.playwright = await async_playwright().start()
+            # Playwright simples com timeout agressivo
+            logger.info("📦 Iniciando Playwright...")
+            try:
+                self.playwright = await asyncio.wait_for(
+                    async_playwright().start(), 
+                    timeout=15
+                )
+                logger.info("✅ Playwright iniciado")
+            except asyncio.TimeoutError:
+                logger.error("❌ Timeout ao iniciar Playwright")
+                return False
             
-            # Argumentos mínimos necessários
+            # Argumentos ULTRA mínimos para evitar travamento
             args = [
                 '--no-sandbox',
-                '--disable-setuid-sandbox', 
                 '--disable-dev-shm-usage',
+                '--headless=new',
                 '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
                 '--no-first-run',
-                '--disable-default-apps',
+                '--no-default-browser-check',
                 '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--disable-translate',
-                '--mute-audio',
-                # CRASHPAD - SOLUÇÃO DEFINITIVA
-                '--disable-crashpad',
+                '--disable-plugins',
                 '--disable-crash-reporter',
                 '--disable-breakpad',
-                '--crash-dumps-dir=/tmp',
-                # Debug port para conexão externa
-                f'--remote-debugging-port={self.debug_port}',
-                '--remote-allow-origins=*'
+                '--mute-audio',
+                f'--remote-debugging-port={self.debug_port}'
             ]
             
-            # Lançar navegador com debug port
-            self.browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=args,
-                devtools=False
-            )
+            logger.info("🌐 Lançando navegador Chrome...")
+            logger.info(f"🔧 Args: {len(args)} argumentos")
             
-            # Contexto simples
-            self.context = await self.browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={'width': 1920, 'height': 1080}
-            )
+            # Tentar lançar navegador com timeout muito agressivo
+            try:
+                self.browser = await asyncio.wait_for(
+                    self.playwright.chromium.launch(
+                        headless=True,
+                        args=args,
+                        timeout=30000,  # 30 segundos apenas
+                        slow_mo=None,
+                        devtools=False
+                    ),
+                    timeout=45  # 45 segundos max
+                )
+                logger.info("✅ Navegador Chrome lançado")
+            except asyncio.TimeoutError:
+                logger.error("❌ Timeout ao lançar Chrome - tentando com argumentos mínimos")
+                # Fallback com argumentos ainda mais mínimos
+                minimal_args = ['--no-sandbox', '--disable-dev-shm-usage', '--headless=new']
+                try:
+                    self.browser = await asyncio.wait_for(
+                        self.playwright.chromium.launch(
+                            headless=True,
+                            args=minimal_args,
+                            timeout=20000
+                        ),
+                        timeout=30
+                    )
+                    logger.info("✅ Navegador lançado com argumentos mínimos")
+                except:
+                    logger.error("❌ Falha total no lançamento do navegador")
+                    return False
             
-            # Página simples
-            self.page = await self.context.new_page()
+            logger.info("🔗 Criando contexto do navegador...")
+            try:
+                self.context = await asyncio.wait_for(
+                    self.browser.new_context(
+                        user_agent="Mozilla/5.0 (Linux; x86_64) AppleWebKit/537.36",
+                        viewport={'width': 1280, 'height': 720}
+                    ),
+                    timeout=20
+                )
+                logger.info("✅ Contexto criado")
+            except asyncio.TimeoutError:
+                logger.error("❌ Timeout ao criar contexto")
+                return False
             
-            # Carregar cookies se existirem
+            logger.info("📄 Criando página...")
+            try:
+                self.page = await asyncio.wait_for(
+                    self.context.new_page(),
+                    timeout=15
+                )
+                logger.info("✅ Página criada")
+            except asyncio.TimeoutError:
+                logger.error("❌ Timeout ao criar página")
+                return False
+            
+            logger.info("🍪 Carregando cookies existentes...")
             await self._load_cookies()
             
-            # Ir para YouTube uma vez
-            await self.page.goto("https://www.youtube.com", timeout=60000)
-            await asyncio.sleep(3)
+            logger.info("🌐 Navegando para YouTube...")
+            try:
+                await asyncio.wait_for(
+                    self.page.goto("https://www.youtube.com", wait_until="networkidle"),
+                    timeout=60
+                )
+                logger.info("✅ YouTube carregado")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Timeout no YouTube, tentando com domcontentloaded...")
+                try:
+                    await asyncio.wait_for(
+                        self.page.goto("https://www.youtube.com", wait_until="domcontentloaded"),
+                        timeout=30
+                    )
+                    logger.info("✅ YouTube carregado (domcontentloaded)")
+                except:
+                    logger.error("❌ Falha total ao carregar YouTube")
+                    return False
             
-            # Extrair e salvar cookies
+            await asyncio.sleep(2)
+            
+            logger.info("💾 Salvando cookies...")
             await self._save_cookies()
             
             # Marcar como ativo
@@ -116,6 +182,7 @@ class PersistentSessionManager:
             
         except Exception as e:
             logger.error(f"❌ Erro na inicialização simples: {e}")
+            logger.error(f"❌ Tipo do erro: {type(e).__name__}")
             await self._cleanup()
             return False
 
