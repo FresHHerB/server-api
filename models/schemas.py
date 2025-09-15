@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import re
 
@@ -15,7 +15,8 @@ class VideoRequest(BaseModel):
         max_items=10
     )
 
-    @validator('video_urls')
+    @field_validator('video_urls')
+    @classmethod
     def validate_youtube_urls(cls, v):
         """Valida se as URLs são do YouTube"""
         youtube_pattern = re.compile(
@@ -32,7 +33,7 @@ class VideoRequest(BaseModel):
         return valid_urls
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "video_urls": [
                     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -60,14 +61,16 @@ class VideoData(BaseModel):
         ge=0
     )
 
-    @validator('titulo')
+    @field_validator('titulo')
+    @classmethod
     def titulo_not_empty(cls, v):
         """Valida que o título não está vazio"""
         if not v or v.strip() == "":
             return "Título não disponível"
         return v.strip()
 
-    @validator('transcricao')
+    @field_validator('transcricao')
+    @classmethod
     def transcricao_not_empty(cls, v):
         """Valida que a transcrição não está vazia"""
         if not v or v.strip() == "":
@@ -75,7 +78,7 @@ class VideoData(BaseModel):
         return v.strip()
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "titulo": "Como Programar em Python - Aula 1",
                 "transcricao": "Bem-vindos ao curso de Python. Hoje vamos aprender os fundamentos da linguagem...",
@@ -101,7 +104,7 @@ class VideoResponse(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "success": True,
                 "message": "Processados 2 vídeo(s) com sucesso",
@@ -142,7 +145,7 @@ class ErrorResponse(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "success": False,
                 "message": "Token de acesso inválido",
@@ -170,7 +173,7 @@ class SessionStatusResponse(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "success": True,
                 "session_status": {
@@ -210,7 +213,7 @@ class SessionRefreshResponse(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "success": True,
                 "message": "Sessão atualizada com sucesso",
@@ -245,7 +248,7 @@ class HealthCheckResponse(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "healthy",
                 "version": "3.0.0",

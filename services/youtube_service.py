@@ -3,7 +3,7 @@ import asyncio
 import logging
 import tempfile
 import uuid
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 import yt_dlp
 from pathlib import Path
 import time
