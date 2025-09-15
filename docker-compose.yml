@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  youtube-transcription-persistent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: youtube_transcription_persistent
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      # Configurações obrigatórias
+      - API_TOKEN=${API_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Configurações básicas
+      - PORT=${PORT:-8000}
+      - WHISPER_API_MODEL=${WHISPER_API_MODEL:-whisper-1}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONPATH=/app
+      
+      # Sessão persistente
+      - PERSISTENT_SESSION_ENABLED=${PERSISTENT_SESSION_ENABLED:-true}
+      
+      # Playwright
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - DISPLAY=:99
+      
+      # CORS
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-*}
+      
+      # Recursos e limites
+      - MAX_VIDEOS_PER_REQUEST=${MAX_VIDEOS_PER_REQUEST:-10}
+      - AUTO_CLEANUP_TEMP_FILES=${AUTO_CLEANUP_TEMP_FILES:-true}
+      - TEMP_FILE_MAX_AGE_HOURS=${TEMP_FILE_MAX_AGE_HOURS:-24}
+      - MAX_VIDEO_DURATION_MINUTES=${MAX_VIDEO_DURATION_MINUTES:-120}
+      - MAX_CONCURRENT_DOWNLOADS=${MAX_CONCURRENT_DOWNLOADS:-2}
+      - MAX_CONCURRENT_TRANSCRIPTIONS=${MAX_CONCURRENT_TRANSCRIPTIONS:-1}
+      
+    env_file:
+      - .env
+    volumes:
+      # Volume para perfil persistente do navegador (CRÍTICO)
+      - browser_profile_data:/app/browser_profile
+      
+      # Volume para logs
+      - ./logs:/app/logs
+      
+      # Volume para arquivos temporários
+      - temp_files:/app/temp
+      
+      # Volume para cookies (backup)
+      - ./cookies.txt:/app/cookies.txt:rw
+      
+      # Compartilhamento do X11 para Xvfb
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      
+    restart: unless-stopped
+    
+    # Health check atualizado
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 45s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
+    
+    # Recursos otimizados para sessão persistente
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '3.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+    
+    # Configurações de logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    
+    # Configurações de segurança
+    security_opt:
+      - seccomp:unconfined
+    
+    # Capabilities necessárias para Xvfb e Playwright
+    cap_add:
+      - SYS_ADMIN
+    
+    # Configurações de rede
+    networks:
+      - transcription_network
+
+# Volumes nomeados para persistência
+volumes:
+  # Volume CRÍTICO para perfil do navegador
+  browser_profile_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./browser_profile
+  
+  # Volume para arquivos temporários
+  temp_files:
+    driver: local
+  
+  # Volume para logs
+  app_logs:
+    driver: local
+
+# Rede personalizada
+networks:
+  transcription_network:
+    name: youtube_transcription_persistent_network
+    driver: bridge
+
+# =============================================================================
+# INSTRUÇÕES DE USO:
+# 
+# 1. PRIMEIRA EXECUÇÃO:
+#    mkdir -p browser_profile logs
+#    cp .env.example .env
+#    # Configure .env com suas credenciais
+#    docker-compose up --build
+# 
+# 2. MONITORAMENTO:
+#    docker-compose logs -f youtube-transcription-persistent
+#    curl http://localhost:8000/health
+# 
+# 3. BACKUP DO PERFIL:
+#    tar -czf browser_profile_backup.tar.gz browser_profile/
+# 
+# 4. VOLUMES IMPORTANTES:
+#    - browser_profile/: Perfil persistente do navegador (cookies, sessão)
+#    - logs/: Logs da aplicação
+#    - cookies.txt: Arquivo de cookies (atualizado automaticamente)
+# 
+# 5. ESCALABILIDADE:
+#    Para múltiplas instâncias, cada uma precisa de seu próprio browser_profile
+# 
+# =============================================================================

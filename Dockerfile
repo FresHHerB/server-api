@@ -1,0 +1,122 @@
+# Ubuntu 20.04 LTS para melhor compatibilidade com Playwright
+FROM ubuntu:20.04
+
+# Evitar prompts interativos
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # Playwright configurações
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_DOWNLOAD_TIMEOUT=300000
+
+# Instalar dependências do sistema
+RUN apt-get update && apt-get install -y \
+    # Ferramentas básicas
+    software-properties-common \
+    curl \
+    wget \
+    ca-certificates \
+    gnupg \
+    git \
+    # FFmpeg para processamento de áudio
+    ffmpeg \
+    # Dependências do Playwright/Chromium
+    libnss3 \
+    libnspr4 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libxss1 \
+    libxtst6 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libatk1.0-0 \
+    libcairo-gobject2 \
+    libgtk-3-0 \
+    libgdk-pixbuf2.0-0 \
+    # Fontes para Ubuntu 20.04
+    fonts-liberation \
+    fonts-dejavu-core \
+    fontconfig \
+    # Xvfb para ambiente headless
+    xvfb \
+    # Dependências adicionais
+    libxrandr2 \
+    libu2f-udev \
+    libvulkan1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Adicionar repositório Python 3.11
+RUN add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt-get update && \
+    apt-get install -y \
+        python3.11 \
+        python3.11-pip \
+        python3.11-dev \
+        python3.11-venv \
+        python3.11-distutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Criar links simbólicos para Python
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# Atualizar pip
+RUN python3.11 -m pip install --upgrade pip setuptools wheel
+
+# Criar usuário não-root
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Definir diretório de trabalho
+WORKDIR /app
+
+# Copiar requirements e instalar dependências Python
+COPY requirements.txt .
+RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
+
+# Instalar Playwright e browsers de forma robusta
+RUN python3.11 -m playwright install-deps && \
+    python3.11 -m playwright install chromium
+
+# Criar diretórios necessários com permissões corretas
+RUN mkdir -p /app/logs \
+             /app/temp \
+             /app/browser_profile \
+             /ms-playwright && \
+    chown -R appuser:appuser /app /ms-playwright
+
+# Copiar código da aplicação
+COPY --chown=appuser:appuser . .
+
+# Mudar para usuário não-root
+USER appuser
+
+# Configurar variáveis de ambiente para Playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    DISPLAY=:99
+
+# Expor porta
+EXPOSE 8000
+
+# Script de inicialização com Xvfb
+RUN echo '#!/bin/bash\n\
+# Iniciar Xvfb em background\n\
+Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &\n\
+# Aguardar Xvfb inicializar\n\
+sleep 2\n\
+# Executar aplicação\n\
+exec python3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=45s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Comando padrão
+CMD ["/app/start.sh"]
