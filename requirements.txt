@@ -3,15 +3,18 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Download de vídeos do YouTube
+# Download de vídeos do YouTube  
 yt-dlp>=2024.01.01
 
 # OpenAI para transcrição
 openai>=1.0.0
 
-# Playwright para automação com stealth
-playwright==1.40.0
+# Playwright com stealth otimizado
+playwright==1.41.0
 playwright-stealth==1.0.6
+pyppeteer==1.0.2
+pyppeteer-stealth==2.7.4
+undetected-chromedriver==3.5.4
 
 # Utilitários essenciais
 python-dotenv==1.0.0
@@ -19,11 +22,13 @@ pydantic==2.4.2
 httpx==0.25.2
 aiofiles==23.2.0
 
-# Dependências extras para yt-dlp
+# Dependências extras para yt-dlp e stealth
 brotli>=1.1.0
 mutagen>=1.47.0
 websockets>=11.0
 certifi>=2023.11.17
+fake-useragent==1.4.0
+selenium-stealth==1.0.6
 
 # Processamento de dados
 numpy==1.24.4
@@ -35,6 +40,6 @@ psutil==5.9.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
-# Desenvolvimento (opcional - remover em produção se necessário)
+# Desenvolvimento
 pytest==7.4.3
 pytest-asyncio==0.21.1

@@ -1,10 +1,12 @@
 import os
 import asyncio
 import logging
+import random
 from pathlib import Path
 from typing import Optional, Dict, List
-from playwright.async_api import async_playwright, BrowserContext, Page
+from playwright.async_api import async_playwright, BrowserContext, Page, Browser
 from playwright_stealth import stealth_async
+from fake_useragent import UserAgent
 import time
 from datetime import datetime, timedelta
 import json
@@ -12,7 +14,7 @@ import json
 logger = logging.getLogger(__name__)
 
 class PersistentSessionManager:
-    """Gerenciador de sessão persistente do navegador para YouTube"""
+    """Gerenciador de sessão persistente otimizado para playwright-stealth"""
 
     def __init__(self, 
                  cookie_filepath: str = "cookies.txt", 
@@ -22,6 +24,7 @@ class PersistentSessionManager:
         
         # Componentes da sessão
         self.playwright = None
+        self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         
@@ -33,169 +36,82 @@ class PersistentSessionManager:
         self.last_cookie_update = None
         self.refresh_count = 0
         
-        # Configurações
-        self.max_session_duration = timedelta(hours=8)
-        self.cookie_refresh_interval = timedelta(minutes=5)
-        self.health_check_interval = timedelta(minutes=2)
+        # User agent rotator
+        self.ua = UserAgent(platforms=['windows'], browsers=['chrome'])
+        self.current_user_agent = self.ua.chrome
         
         # Lock para operações concorrentes
         self._lock = asyncio.Lock()
         self._shutdown_requested = False
         
-        # Tasks em background
-        self._health_check_task = None
-        self._auto_refresh_task = None
-        
         # Criar diretório de perfil
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"🎭 PersistentSessionManager inicializado")
+        logger.info(f"🎭 PersistentSessionManager inicializado (stealth otimizado)")
         logger.info(f"📁 Perfil do navegador: {self.profile_dir}")
         logger.info(f"🍪 Arquivo de cookies: {self.cookie_filepath}")
 
     async def initialize(self) -> bool:
-        """Inicializa a sessão persistente"""
+        """Inicializa a sessão persistente com playwright-stealth"""
         async with self._lock:
             if self.is_active:
                 logger.info("✅ Sessão já está ativa")
                 return True
                 
             try:
-                logger.info("🚀 Inicializando sessão persistente...")
+                logger.info("🚀 Inicializando sessão stealth persistente...")
                 
                 # Inicializar Playwright
                 self.playwright = await async_playwright().start()
                 
-                # Configurações do navegador otimizadas para Docker (SOLUÇÃO CRASHPAD)
-                browser_args = [
-                    # Segurança e sandbox
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    
-                    # GPU e renderização
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                    '--disable-gpu-sandbox',
-                    
-                    # SOLUÇÃO CRASHPAD - desabilitar completamente
-                    '--disable-crashpad',
-                    '--disable-crash-reporter', 
-                    '--disable-breakpad',
-                    '--no-crash-upload',
-                    '--crash-dumps-dir=/tmp/chrome-crashpad',
-                    
-                    # Core features
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-extensions',
-                    '--no-first-run',
-                    '--disable-default-apps',
-                    
-                    # Background processes
-                    '--disable-background-timer-throttling',
-                    '--disable-renderer-backgrounding',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-background-networking',
-                    
-                    # Security and privacy
-                    '--disable-client-side-phishing-detection',
-                    '--disable-sync',
-                    '--disable-translate',
-                    
-                    # UI elements
-                    '--hide-scrollbars',
-                    '--mute-audio',
-                    '--disable-infobars',
-                    
-                    # System integration
-                    '--no-zygote',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-component-update',
-                    '--disable-domain-reliability',
-                    '--disable-features=TranslateUI,BlinkGenPropertyTrees,MediaRouter',
-                    '--no-default-browser-check',
-                    
-                    # Development and debugging
-                    '--disable-dev-tools',
-                    '--disable-logging',
-                    '--log-level=3',
-                    
-                    # Permissions and prompts  
-                    '--disable-hang-monitor',
-                    '--disable-popup-blocking',
-                    '--disable-prompt-on-repost',
-                    
-                    # Memory and performance
-                    '--memory-pressure-off',
-                    '--max_old_space_size=4096',
-                    '--disable-field-trial-config',
-                    
-                    # Disable problematic features
-                    '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees'
-                ]
+                # User agent dinâmico
+                self.current_user_agent = self.ua.chrome
+                logger.info(f"🎭 User-Agent: {self.current_user_agent}")
                 
-                # Usar contexto persistente
-                self.context = await self.playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(self.profile_dir),
+                # Argumentos otimizados para stealth
+                stealth_args = self._get_stealth_args()
+                
+                # Usar browser normal (não persistent context para melhor controle)
+                self.browser = await self.playwright.chromium.launch(
                     headless=True,
-                    args=browser_args,
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    ),
+                    args=stealth_args,
+                    slow_mo=random.randint(50, 150),  # Humanizar timing
+                    chromium_sandbox=False
+                )
+                
+                # Criar contexto com stealth settings
+                self.context = await self.browser.new_context(
+                    user_agent=self.current_user_agent,
                     viewport={'width': 1920, 'height': 1080},
                     locale='pt-BR',
                     timezone_id='America/Sao_Paulo',
+                    permissions=['geolocation'],
+                    geolocation={'latitude': -23.5505, 'longitude': -46.6333},  # São Paulo
+                    color_scheme='light',
+                    reduced_motion='reduce',
+                    forced_colors='none',
                     extra_http_headers={
-                        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8,en-US;q=0.7',
                         'Accept-Encoding': 'gzip, deflate, br',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
                         'Upgrade-Insecure-Requests': '1',
                         'Sec-Fetch-Dest': 'document',
                         'Sec-Fetch-Mode': 'navigate',
                         'Sec-Fetch-Site': 'none',
-                        'Cache-Control': 'no-cache'
-                    },
-                    ignore_https_errors=True,
-                    java_script_enabled=True,
-                    bypass_csp=True
+                        'Sec-Fetch-User': '?1',
+                        'sec-ch-ua': '"Google Chrome";v="120", "Chromium";v="120", "Not_A Brand";v="99"',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-platform': '"Windows"'
+                    }
                 )
                 
                 # Criar página principal
-                if self.context.pages:
-                    self.page = self.context.pages[0]
-                else:
-                    self.page = await self.context.new_page()
+                self.page = await self.context.new_page()
                 
-                # Aplicar stealth com configurações avançadas
-                await stealth_async(self.page)
-                
-                # Configurações adicionais de stealth
-                await self.page.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined,
-                    });
-                    
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5],
-                    });
-                    
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
-                    });
-                    
-                    window.chrome = {
-                        runtime: {},
-                    };
-                    
-                    Object.defineProperty(navigator, 'permissions', {
-                        get: () => ({
-                            query: () => Promise.resolve({ state: 'granted' }),
-                        }),
-                    });
-                """)
+                # Aplicar stealth avançado
+                await self._apply_advanced_stealth()
                 
                 # Carregar cookies existentes
                 await self._load_initial_cookies()
@@ -209,100 +125,206 @@ class PersistentSessionManager:
                 self.session_start_time = datetime.now()
                 self.last_activity = datetime.now()
                 
-                # NAVEGADOR NUNCA FECHA - não iniciar tasks que podem interferir
-                # self._start_background_tasks() # Desabilitado para manter navegador sempre aberto
-                logger.info("🔒 Navegador configurado para NUNCA fechar - modo persistente simples")
-                
-                logger.info("✅ Sessão persistente inicializada com sucesso!")
+                logger.info("✅ Sessão persistente stealth inicializada com sucesso!")
+                logger.info("🔒 Navegador configurado para NUNCA fechar")
                 return True
                 
             except Exception as e:
-                logger.error(f"❌ Erro ao inicializar sessão: {e}")
-                logger.info("🔄 Tentando inicialização alternativa sem contexto persistente...")
-                
-                # Tentar inicialização alternativa
-                try:
-                    await self._cleanup_session()
-                    return await self._initialize_alternative_mode()
-                except Exception as e2:
-                    logger.error(f"❌ Falha também no modo alternativo: {e2}")
-                    await self._cleanup_session()
-                    return False
+                logger.error(f"❌ Erro ao inicializar sessão stealth: {e}")
+                await self._cleanup_session()
+                return False
 
-    async def _initialize_alternative_mode(self) -> bool:
-        """Modo alternativo de inicialização com configurações mais conservadoras"""
+    def _get_stealth_args(self) -> List[str]:
+        """Argumentos otimizados para stealth máximo"""
+        return [
+            # Segurança
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            
+            # Anti-detecção core
+            '--disable-blink-features=AutomationControlled',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-ipc-flooding-protection',
+            
+            # GPU e renderização
+            '--disable-gpu',
+            '--disable-software-rasterizer', 
+            '--disable-gpu-sandbox',
+            '--use-gl=swiftshader',
+            
+            # Stealth específico
+            '--disable-extensions',
+            '--disable-extensions-file-access-check',
+            '--disable-extensions-http-throttling',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-domain-reliability',
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+            
+            # Performance e recursos
+            '--memory-pressure-off',
+            '--max_old_space_size=4096',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-hang-monitor',
+            '--disable-prompt-on-repost',
+            '--disable-popup-blocking',
+            
+            # Audio/Video
+            '--mute-audio',
+            '--disable-audio-output',
+            
+            # Logging e crash (SOLUÇÃO DEFINITIVA)
+            '--disable-logging',
+            '--disable-crashpad',
+            '--disable-crash-reporter',
+            '--disable-breakpad',
+            '--no-crash-upload',
+            '--log-level=3',
+            '--silent',
+            
+            # Flags adicionais de stealth
+            '--disable-infobars',
+            '--disable-dev-tools',
+            '--disable-remote-fonts',
+            '--disable-shared-workers',
+            '--disable-speech-api',
+            '--disable-file-system',
+            '--disable-presentation-api',
+            '--disable-permissions-api',
+            '--disable-new-zip-unpacker',
+            '--disable-media-session-api',
+            '--disable-notifications',
+            '--autoplay-policy=no-user-gesture-required'
+        ]
+
+    async def _apply_advanced_stealth(self):
+        """Aplicar stealth avançado e personalizado"""
         try:
-            logger.info("🔄 Iniciando modo alternativo...")
-            
-            # Inicializar Playwright novamente
-            self.playwright = await async_playwright().start()
-            
-            # Argumentos mais conservadores com solução crashpad
-            minimal_args = [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--headless=new',
-                # SOLUÇÃO CRASHPAD
-                '--disable-crashpad',
-                '--disable-crash-reporter',
-                '--disable-breakpad',
-                '--no-crash-upload',
-                '--crash-dumps-dir=/tmp/chrome-crashpad',
-                # Outros
-                '--disable-logging',
-                '--no-first-run',
-                '--disable-default-apps',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--log-level=3'
-            ]
-            
-            # Usar browser normal em vez de contexto persistente
-            browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=minimal_args
-            )
-            
-            self.context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={'width': 1920, 'height': 1080},
-                locale='pt-BR',
-                timezone_id='America/Sao_Paulo',
-                extra_http_headers={
-                    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                }
-            )
-            
-            self.page = await self.context.new_page()
-            
-            # Aplicar stealth básico
+            # Aplicar playwright-stealth básico
             await stealth_async(self.page)
             
-            # Carregar cookies existentes
-            await self._load_initial_cookies()
+            # Scripts avançados de stealth
+            await self.page.add_init_script("""
+                // Override navigator properties
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                    configurable: true
+                });
+                
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [
+                        {name: 'Chrome PDF Plugin', description: 'Portable Document Format', filename: 'internal-pdf-viewer'},
+                        {name: 'Chrome PDF Viewer', description: '', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
+                        {name: 'Native Client', description: '', filename: 'internal-nacl-plugin'}
+                    ],
+                    configurable: true
+                });
+                
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+                    configurable: true
+                });
+                
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => Math.max(2, Math.floor(Math.random() * 8) + 1),
+                    configurable: true
+                });
+                
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => Math.pow(2, Math.floor(Math.random() * 3) + 2),
+                    configurable: true
+                });
+                
+                // Chrome runtime object
+                window.chrome = {
+                    runtime: {
+                        onConnect: undefined,
+                        onMessage: undefined
+                    },
+                    csi: () => ({}),
+                    loadTimes: () => ({
+                        commitLoadTime: Date.now() / 1000 - Math.random() * 100,
+                        connectionInfo: 'h2',
+                        finishDocumentLoadTime: Date.now() / 1000 - Math.random() * 50,
+                        finishLoadTime: Date.now() / 1000 - Math.random() * 30,
+                        firstPaintAfterLoadTime: 0,
+                        firstPaintTime: Date.now() / 1000 - Math.random() * 80,
+                        navigationType: 'Other',
+                        npnNegotiatedProtocol: 'h2',
+                        requestTime: Date.now() / 1000 - Math.random() * 120,
+                        startLoadTime: Date.now() / 1000 - Math.random() * 110,
+                        wasAlternateProtocolAvailable: false,
+                        wasFetchedViaSpdy: true,
+                        wasNpnNegotiated: true
+                    })
+                };
+                
+                // Permissions API mock
+                Object.defineProperty(navigator, 'permissions', {
+                    get: () => ({
+                        query: (params) => Promise.resolve({
+                            state: Math.random() > 0.5 ? 'granted' : 'prompt',
+                            name: params.name
+                        })
+                    }),
+                    configurable: true
+                });
+                
+                // Battery API mock
+                Object.defineProperty(navigator, 'getBattery', {
+                    get: () => () => Promise.resolve({
+                        charging: Math.random() > 0.5,
+                        chargingTime: Math.random() * 10000,
+                        dischargingTime: Math.random() * 20000,
+                        level: Math.random()
+                    }),
+                    configurable: true
+                });
+                
+                // WebGL fingerprint protection
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel(R) Iris(TM) Graphics 6100';
+                    return getParameter.call(this, parameter);
+                };
+                
+                // Canvas fingerprint protection
+                const toDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function() {
+                    const noise = Math.random() * 0.0001;
+                    const context = this.getContext('2d');
+                    const originalData = context.getImageData(0, 0, this.width, this.height);
+                    for (let i = 0; i < originalData.data.length; i += 4) {
+                        originalData.data[i] += noise;
+                    }
+                    context.putImageData(originalData, 0, 0);
+                    return toDataURL.call(this);
+                };
+                
+                // Remove automation indicators
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
+            """)
             
-            # Estabelecer sessão
-            await self._establish_youtube_session()
-            
-            # Marcar como ativa
-            self.is_active = True
-            self.is_healthy = True
-            self.session_start_time = datetime.now()
-            self.last_activity = datetime.now()
-            
-            logger.info("✅ Modo alternativo inicializado com sucesso!")
-            return True
+            logger.info("🥷 Stealth avançado aplicado com sucesso")
             
         except Exception as e:
-            logger.error(f"❌ Erro no modo alternativo: {e}")
-            return False
+            logger.warning(f"⚠️ Erro ao aplicar stealth avançado: {e}")
 
     async def _load_initial_cookies(self):
         """Carrega cookies iniciais se existirem"""
@@ -319,133 +341,89 @@ class PersistentSessionManager:
             logger.warning(f"⚠️ Erro ao carregar cookies iniciais: {e}")
 
     async def _establish_youtube_session(self):
-        """Estabelece e mantém sessão ativa no YouTube"""
+        """Estabelece sessão stealth no YouTube"""
         try:
-            logger.info("🌐 Estabelecendo sessão no YouTube...")
+            logger.info("🌐 Estabelecendo sessão stealth no YouTube...")
             
-            # Navegar para YouTube
+            # Navegação com timing humanizado
             await self.page.goto("https://www.youtube.com", 
                                  timeout=60000, 
                                  wait_until="domcontentloaded")
             
-            # Aguardar carregamento
-            await self.page.wait_for_timeout(3000)
+            # Aguardar carregamento natural
+            await asyncio.sleep(random.uniform(2, 4))
             
-            # Interações naturais
-            await self._simulate_natural_activity()
+            # Simular comportamento humano
+            await self._simulate_human_behavior()
             
             # Extrair e salvar cookies
             await self._extract_and_save_cookies()
             
-            logger.info("✅ Sessão no YouTube estabelecida")
+            logger.info("✅ Sessão stealth no YouTube estabelecida")
             
         except Exception as e:
-            logger.error(f"❌ Erro ao estabelecer sessão no YouTube: {e}")
+            logger.error(f"❌ Erro ao estabelecer sessão stealth no YouTube: {e}")
             raise
 
-    async def _simulate_natural_activity(self):
-        """Simula atividade humana natural"""
+    async def _simulate_human_behavior(self):
+        """Simula comportamento humano avançado"""
         try:
-            # Scroll suave para baixo
-            await self.page.evaluate("window.scrollTo({top: 300, behavior: 'smooth'})")
-            await self.page.wait_for_timeout(1500)
+            # Movimento natural do mouse
+            for _ in range(random.randint(2, 4)):
+                x = random.randint(100, 1820)
+                y = random.randint(100, 980)
+                await self.page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.1, 0.3))
             
-            # Movimento do mouse
-            await self.page.mouse.move(400, 300)
-            await self.page.wait_for_timeout(800)
-            await self.page.mouse.move(600, 450)
-            await self.page.wait_for_timeout(1200)
+            # Scroll natural
+            scroll_amount = random.randint(200, 600)
+            await self.page.evaluate(f"window.scrollTo({{top: {scroll_amount}, behavior: 'smooth'}})")
+            await asyncio.sleep(random.uniform(1, 2))
             
-            # Scroll para cima
+            # Voltar ao topo
             await self.page.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
-            await self.page.wait_for_timeout(1000)
+            await asyncio.sleep(random.uniform(0.5, 1))
             
-            # Hover em elementos
+            # Hover em elementos se existirem
             try:
-                # Tentar hover no logo do YouTube
-                await self.page.hover('a[href="/"]', timeout=5000)
-                await self.page.wait_for_timeout(500)
-            except Exception:
+                await self.page.hover('ytd-masthead', timeout=5000)
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+            except:
                 pass
+                
+            # Movimento final aleatório
+            final_x = random.randint(400, 1520)
+            final_y = random.randint(300, 780)
+            await self.page.mouse.move(final_x, final_y)
             
-            # Movimento final do mouse
-            await self.page.mouse.move(500, 350)
-            await self.page.wait_for_timeout(1000)
+            logger.debug("🎭 Comportamento humano simulado")
             
         except Exception as e:
-            logger.debug(f"Erro em atividade simulada: {e}")
+            logger.debug(f"Erro na simulação humana: {e}")
 
     async def refresh_cookies(self) -> bool:
-        """Refresh simples - recarregar página e coletar cookies"""
+        """Refresh inteligente de cookies com stealth"""
         if not self.is_active or not self.page:
             logger.warning("⚠️ Sessão não está ativa para refresh")
             return False
             
         try:
-            logger.info("🔄 Refresh simples de cookies...")
+            logger.info("🔄 Refresh stealth de cookies...")
             
-            # Apenas recarregar a página do YouTube
-            await self.page.goto("https://www.youtube.com", timeout=30000, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(2000)
+            # User agent rotation ocasional
+            if random.random() < 0.3:  # 30% chance
+                await self._rotate_user_agent()
             
-            # Movimento simples do mouse
-            await self.page.mouse.move(500, 400)
-            await self.page.wait_for_timeout(500)
+            # Navegação para YouTube
+            await self.page.goto("https://www.youtube.com", 
+                                 timeout=45000, 
+                                 wait_until="domcontentloaded")
             
-            # Extrair e salvar cookies
-            success = await self._extract_and_save_cookies()
+            # Timing humanizado
+            await asyncio.sleep(random.uniform(1.5, 3))
             
-            if success:
-                self.last_activity = datetime.now()
-                self.last_cookie_update = datetime.now()
-                self.refresh_count += 1
-                logger.info(f"✅ Cookies atualizados simples (#{self.refresh_count})")
-                return True
-            else:
-                logger.warning("⚠️ Falha ao extrair cookies")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Erro no refresh simples: {e}")
-            # NÃO fechar o navegador em caso de erro
-            return False
-
-    async def light_refresh(self) -> bool:
-        """Refresh leve apenas com movimento do mouse"""
-        if not self.is_active or not self.page:
-            return False
-            
-        try:
-            # Movimento leve do mouse para manter sessão ativa
-            await self.page.mouse.move(400, 400)
-            await self.page.wait_for_timeout(200)
-            await self.page.mouse.move(500, 500)
-            
-            self.last_activity = datetime.now()
-            return True
-            
-        except Exception as e:
-            logger.debug(f"Erro no light refresh: {e}")
-            return False
-
-    async def force_refresh(self) -> bool:
-        """Refresh forçado - nunca fecha navegador"""
-        if not self.is_active or not self.page:
-            logger.warning("⚠️ Navegador não está ativo")
-            return False
-            
-        try:
-            logger.info("🔄 Refresh forçado - mantendo navegador aberto...")
-            
-            # Navegar para YouTube novamente
-            await self.page.goto("https://www.youtube.com", timeout=45000, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(3000)
-            
-            # Atividade simulada simples
-            await self.page.mouse.move(400, 300)
-            await self.page.wait_for_timeout(1000)
-            await self.page.mouse.move(600, 450)
-            await self.page.wait_for_timeout(1000)
+            # Comportamento humano leve
+            await self._simulate_human_behavior()
             
             # Extrair cookies
             success = await self._extract_and_save_cookies()
@@ -454,21 +432,88 @@ class PersistentSessionManager:
                 self.last_activity = datetime.now()
                 self.last_cookie_update = datetime.now()
                 self.refresh_count += 1
-                logger.info(f"✅ Refresh forçado #{self.refresh_count} - navegador permanece aberto")
+                logger.info(f"✅ Cookies stealth atualizados (#{self.refresh_count})")
                 return True
             else:
-                logger.warning("⚠️ Falha na extração de cookies, mas navegador permanece aberto")
+                logger.warning("⚠️ Falha ao extrair cookies")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Erro no refresh forçado: {e}")
-            logger.info("🔒 Navegador permanece aberto mesmo com erro")
+            logger.error(f"❌ Erro no refresh stealth: {e}")
+            return False
+
+    async def _rotate_user_agent(self):
+        """Rotaciona user agent ocasionalmente"""
+        try:
+            new_ua = self.ua.chrome
+            if new_ua != self.current_user_agent:
+                self.current_user_agent = new_ua
+                await self.page.set_extra_http_headers({'User-Agent': new_ua})
+                logger.debug(f"🔄 User-Agent rotacionado: {new_ua[:50]}...")
+        except Exception as e:
+            logger.debug(f"Erro na rotação de UA: {e}")
+
+    async def force_refresh(self) -> bool:
+        """Refresh forçado com stealth avançado"""
+        if not self.is_active or not self.page:
+            return False
+            
+        try:
+            logger.info("🔄 Refresh forçado stealth...")
+            
+            # Limpar cache e cookies antigos
+            await self.context.clear_cookies()
+            
+            # Recarregar cookies do arquivo
+            await self._load_initial_cookies()
+            
+            # Navegação com stealth
+            await self.page.goto("https://www.youtube.com", 
+                                 timeout=60000, 
+                                 wait_until="domcontentloaded")
+            
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # Comportamento humano mais elaborado
+            await self._simulate_human_behavior()
+            
+            # Nova extração
+            success = await self._extract_and_save_cookies()
+            
+            if success:
+                self.last_activity = datetime.now()
+                self.last_cookie_update = datetime.now()
+                self.refresh_count += 1
+                logger.info(f"✅ Refresh forçado stealth #{self.refresh_count}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Erro no refresh forçado stealth: {e}")
+            
+        return False
+
+    async def light_refresh(self) -> bool:
+        """Refresh leve apenas para manter atividade"""
+        if not self.is_active or not self.page:
+            return False
+            
+        try:
+            # Movimento leve do mouse
+            x = random.randint(200, 1720)
+            y = random.randint(200, 880)
+            await self.page.mouse.move(x, y)
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+            
+            self.last_activity = datetime.now()
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Erro no light refresh: {e}")
             return False
 
     async def _extract_and_save_cookies(self) -> bool:
-        """Extrai e salva cookies da sessão"""
+        """Extrai e salva cookies com preservação inteligente"""
         try:
-            # Extrair cookies do contexto
             cookies = await self.context.cookies()
             
             if not cookies:
@@ -479,17 +524,17 @@ class PersistentSessionManager:
             relevant_cookies = [
                 cookie for cookie in cookies 
                 if any(domain in cookie.get('domain', '') 
-                       for domain in ['youtube.com', 'google.com', 'googlevideo.com'])
+                       for domain in ['youtube.com', 'google.com', 'googlevideo.com', 'googleusercontent.com'])
             ]
             
             if not relevant_cookies:
                 logger.warning("⚠️ Nenhum cookie relevante encontrado")
                 return False
             
-            # Salvar no formato Netscape
+            # Salvar no formato Netscape otimizado
             self._write_netscape_cookies(relevant_cookies)
             
-            logger.info(f"💾 {len(relevant_cookies)} cookies salvos")
+            logger.info(f"💾 {len(relevant_cookies)} cookies stealth salvos")
             return True
             
         except Exception as e:
@@ -528,10 +573,10 @@ class PersistentSessionManager:
         return cookies
 
     def _write_netscape_cookies(self, cookies: List[Dict]):
-        """Escreve cookies no formato Netscape exato para yt-dlp"""
+        """Escreve cookies no formato Netscape com preservação inteligente"""
         try:
-            # Preservar cookies existentes importantes se já existem
-            existing_cookies = {}
+            # Preservar cookies importantes existentes
+            important_cookies = {}
             if os.path.exists(self.cookie_filepath):
                 try:
                     with open(self.cookie_filepath, 'r', encoding='utf-8') as f:
@@ -540,136 +585,63 @@ class PersistentSessionManager:
                                 continue
                             parts = line.strip().split('\t')
                             if len(parts) == 7:
-                                cookie_key = f"{parts[0]}:{parts[5]}"  # domain:name
-                                existing_cookies[cookie_key] = line.strip()
+                                domain, _, _, _, _, name, value = parts
+                                if name in ['LOGIN_INFO', 'SID', '__Secure-1PSID', '__Secure-3PSID', 
+                                          'SAPISID', '__Secure-1PAPISID', '__Secure-3PAPISID', 'HSID', 'SSID', 'APISID']:
+                                    important_cookies[f"{domain}:{name}"] = line.strip()
                 except Exception as e:
                     logger.debug(f"Erro ao ler cookies existentes: {e}")
             
             with open(self.cookie_filepath, 'w', encoding='utf-8') as f:
-                # Escrever cabeçalho no formato exato
                 f.write("# Netscape HTTP Cookie File\n")
                 f.write("# http://curl.haxx.se/rfc/cookie_spec.html\n") 
                 f.write("# This is a generated file!  Do not edit.\n\n")
                 
-                # Processar cookies novos
-                new_cookies = {}
+                # Cookies processados
+                written_cookies = set()
+                
+                # Primeiro: cookies importantes preservados
+                for cookie_line in important_cookies.values():
+                    f.write(cookie_line + "\n")
+                    parts = cookie_line.split('\t')
+                    if len(parts) >= 6:
+                        written_cookies.add(f"{parts[0]}:{parts[5]}")
+                
+                # Segundo: cookies novos (evitar duplicatas)
                 for cookie in cookies:
                     domain = cookie.get('domain', '')
                     name = cookie.get('name', '')
                     cookie_key = f"{domain}:{name}"
                     
-                    # Formatação exata para yt-dlp
-                    include_subdomains = "TRUE" if domain.startswith('.') else "FALSE"
-                    secure = "TRUE" if cookie.get('secure', False) else "FALSE"
-                    expires = cookie.get('expires', 0)
-                    if expires == -1 or expires is None:
-                        expires = 0
-                    else:
-                        expires = int(expires)
-                    
-                    cookie_line = (
-                        f"{domain}\t"
-                        f"{include_subdomains}\t"
-                        f"{cookie.get('path', '/')}\t"
-                        f"{secure}\t"
-                        f"{expires}\t"
-                        f"{name}\t"
-                        f"{cookie.get('value', '')}"
-                    )
-                    
-                    new_cookies[cookie_key] = cookie_line
+                    if cookie_key not in written_cookies:
+                        include_subdomains = "TRUE" if domain.startswith('.') else "FALSE"
+                        secure = "TRUE" if cookie.get('secure', False) else "FALSE"
+                        expires = cookie.get('expires', 0)
+                        if expires == -1 or expires is None:
+                            expires = 0
+                        else:
+                            expires = int(expires)
+                        
+                        cookie_line = (
+                            f"{domain}\t"
+                            f"{include_subdomains}\t"
+                            f"{cookie.get('path', '/')}\t"
+                            f"{secure}\t"
+                            f"{expires}\t"
+                            f"{name}\t"
+                            f"{cookie.get('value', '')}"
+                        )
+                        
+                        f.write(cookie_line + "\n")
+                        written_cookies.add(cookie_key)
                 
-                # Mesclar cookies existentes importantes com novos
-                all_cookies = {}
-                
-                # Primeiro, adicionar cookies existentes importantes
-                important_cookies = ['LOGIN_INFO', 'SID', '__Secure-1PSID', '__Secure-3PSID', 
-                                   'SAPISID', '__Secure-1PAPISID', '__Secure-3PAPISID']
-                
-                for cookie_key, cookie_line in existing_cookies.items():
-                    domain, name = cookie_key.split(':', 1)
-                    if name in important_cookies:
-                        all_cookies[cookie_key] = cookie_line
-                        logger.debug(f"Preservando cookie importante: {name}")
-                
-                # Depois, adicionar/atualizar com cookies novos
-                for cookie_key, cookie_line in new_cookies.items():
-                    all_cookies[cookie_key] = cookie_line
-                
-                # Escrever todos os cookies
-                for cookie_line in all_cookies.values():
-                    f.write(cookie_line + "\n")
-                
-                logger.info(f"💾 {len(all_cookies)} cookies salvos (preservando importantes)")
+                logger.info(f"💾 {len(written_cookies)} cookies únicos salvos")
                     
         except Exception as e:
             logger.error(f"Erro ao escrever cookies: {e}")
 
-    def _start_background_tasks(self):
-        """Inicia tasks em background"""
-        if not self._shutdown_requested:
-            self._health_check_task = asyncio.create_task(self._health_check_loop())
-            self._auto_refresh_task = asyncio.create_task(self._auto_refresh_loop())
-
-    async def _health_check_loop(self):
-        """Loop de health check em background"""
-        logger.info("🔍 Iniciando health check loop...")
-        
-        while not self._shutdown_requested and self.is_active:
-            try:
-                await asyncio.sleep(self.health_check_interval.total_seconds())
-                
-                if self._shutdown_requested:
-                    break
-                    
-                # Verificar saúde da página
-                try:
-                    await self.page.evaluate("document.title")
-                    self.is_healthy = True
-                except Exception:
-                    logger.warning("⚠️ Página não responde, marcando como não saudável")
-                    self.is_healthy = False
-                    
-                # Verificar se sessão não expirou
-                if self.session_start_time:
-                    session_age = datetime.now() - self.session_start_time
-                    if session_age > self.max_session_duration:
-                        logger.warning("⏰ Sessão atingiu idade máxima")
-                        await self._renew_session()
-                        
-            except Exception as e:
-                logger.warning(f"⚠️ Erro no health check: {e}")
-                await asyncio.sleep(30)  # Aguardar mais em caso de erro
-
-    async def _auto_refresh_loop(self):
-        """Loop de refresh automático de cookies"""
-        logger.info("🔄 Iniciando auto-refresh loop...")
-        
-        while not self._shutdown_requested and self.is_active:
-            try:
-                await asyncio.sleep(self.cookie_refresh_interval.total_seconds())
-                
-                if self._shutdown_requested:
-                    break
-                    
-                # Refresh automático de cookies
-                if self.is_healthy:
-                    await self.refresh_cookies()
-                else:
-                    logger.warning("⚠️ Pulando refresh automático - sessão não saudável")
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ Erro no auto-refresh: {e}")
-                await asyncio.sleep(60)
-
-    async def _renew_session(self) -> bool:
-        """Sessão não renova - mantém navegador sempre aberto"""
-        logger.warning("⚠️ Renovação desabilitada - navegador permanece sempre aberto")
-        # Apenas tentar refresh simples
-        return await self.refresh_cookies()
-
     async def get_session_status(self) -> Dict:
-        """Retorna status da sessão"""
+        """Retorna status da sessão stealth"""
         return {
             "is_active": self.is_active,
             "is_healthy": self.is_healthy,
@@ -677,33 +649,33 @@ class PersistentSessionManager:
             "last_activity": self.last_activity.isoformat() if self.last_activity else None,
             "last_cookie_update": self.last_cookie_update.isoformat() if self.last_cookie_update else None,
             "refresh_count": self.refresh_count,
-            "profile_dir": str(self.profile_dir),
+            "current_user_agent": self.current_user_agent,
             "session_age_minutes": (
                 (datetime.now() - self.session_start_time).total_seconds() / 60
                 if self.session_start_time else 0
-            )
+            ),
+            "stealth_mode": "advanced"
         }
 
     async def get_detailed_status(self) -> Dict:
-        """Status detalhado com informações extras"""
+        """Status detalhado da sessão stealth"""
         basic_status = await self.get_session_status()
         
-        # Adicionar informações extras
-        basic_status.update({
-            "background_tasks": {
-                "health_check": self._health_check_task and not self._health_check_task.done(),
-                "auto_refresh": self._auto_refresh_task and not self._auto_refresh_task.done()
-            },
-            "configuration": {
-                "max_session_duration_hours": self.max_session_duration.total_seconds() / 3600,
-                "cookie_refresh_interval_minutes": self.cookie_refresh_interval.total_seconds() / 60,
-                "health_check_interval_minutes": self.health_check_interval.total_seconds() / 60
-            },
-            "page_info": {
-                "url": await self.page.url() if self.page else None,
-                "title": await self.page.title() if self.page else None
-            } if self.page else {}
-        })
+        try:
+            basic_status.update({
+                "page_info": {
+                    "url": await self.page.url() if self.page else None,
+                    "title": await self.page.title() if self.page else None
+                } if self.page else {},
+                "stealth_features": {
+                    "user_agent_rotation": True,
+                    "fingerprint_protection": True,
+                    "automation_detection_bypass": True,
+                    "human_behavior_simulation": True
+                }
+            })
+        except Exception as e:
+            logger.debug(f"Erro ao obter status detalhado: {e}")
         
         return basic_status
 
@@ -712,36 +684,30 @@ class PersistentSessionManager:
         self._shutdown_requested = True
         
         try:
-            # Cancelar tasks em background
-            if self._health_check_task and not self._health_check_task.done():
-                self._health_check_task.cancel()
-                
-            if self._auto_refresh_task and not self._auto_refresh_task.done():
-                self._auto_refresh_task.cancel()
-            
-            # Fechar página
             if self.page:
                 await self.page.close()
                 self.page = None
                 
-            # Fechar contexto
             if self.context:
                 await self.context.close()
                 self.context = None
                 
-            # Parar Playwright
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+                
             if self.playwright:
                 await self.playwright.stop()
                 self.playwright = None
                 
             self.is_active = False
             self.is_healthy = False
-            logger.info("🧹 Sessão limpa")
+            logger.info("🧹 Sessão stealth limpa")
             
         except Exception as e:
             logger.warning(f"⚠️ Erro na limpeza da sessão: {e}")
 
     async def shutdown(self):
-        """Shutdown - apenas logs, navegador permanece até fim do container"""
-        logger.info("🛑 Shutdown solicitado - navegador permanecerá ativo até fim do container")
-        # Não chama _cleanup_session para manter navegador aberto
+        """Shutdown - mantém navegador até fim do container"""
+        logger.info("🛑 Shutdown solicitado - navegador stealth permanece ativo")
+        # Não chama cleanup para manter navegador aberto

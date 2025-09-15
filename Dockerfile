@@ -83,9 +83,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
-# Instalar Playwright e browsers de forma robusta
+# Instalar Playwright com stealth otimizado
 RUN python3.11 -m playwright install-deps && \
-    python3.11 -m playwright install chromium --with-deps
+    python3.11 -m playwright install chromium --with-deps && \
+    python3.11 -m playwright install firefox --with-deps
 
 # Criar diretórios necessários com permissões corretas
 RUN mkdir -p /app/logs \
@@ -110,13 +111,17 @@ RUN if [ ! -f cookies.txt ]; then \
 # Mudar para usuário não-root
 USER appuser
 
-# Configurar variáveis de ambiente para Playwright
+# Configurar variáveis de ambiente para Playwright Stealth
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     DISPLAY=:99 \
     PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW=1 \
     CHROME_BIN=/ms-playwright/chromium-*/chrome-linux/chrome \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-*/chrome-linux/chrome
+    PUPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-*/chrome-linux/chrome \
+    # Stealth específico
+    PLAYWRIGHT_STEALTH_MODE=1 \
+    CHROME_DEVEL_SANDBOX=false \
+    CHROME_NO_FIRST_RUN=true
 
 # Expor porta
 EXPOSE 8000
