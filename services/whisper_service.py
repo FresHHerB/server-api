@@ -74,13 +74,26 @@ class WhisperService:
                 # Verificar se a resposta foi bem-sucedida
                 response.raise_for_status()
                 
+                # Debug: verificar conteúdo da resposta
+                logger.debug(f"Response status: {response.status_code}")
+                logger.debug(f"Response headers: {dict(response.headers)}")
+                logger.debug(f"Response content: {response.text[:200]}...")
+                
                 # Para response_format='text', a resposta é diretamente o texto
                 if self.model == "whisper-1" and data.get('response_format') == 'text':
                     transcription = response.text.strip()
+                    if not transcription:
+                        logger.warning("⚠️ OpenAI retornou texto vazio")
+                        return ""
                 else:
                     # Fallback para formato JSON
-                    result = response.json()
-                    transcription = result.get('text', '').strip()
+                    try:
+                        result = response.json()
+                        transcription = result.get('text', '').strip()
+                    except ValueError as json_error:
+                        logger.error(f"❌ Erro ao parsear JSON da OpenAI: {json_error}")
+                        logger.error(f"Response content: {response.text}")
+                        return ""
 
                 char_count = len(transcription)
                 logger.info(f"✅ Transcrição concluída ({char_count} caracteres)")
