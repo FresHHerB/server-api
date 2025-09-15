@@ -126,12 +126,20 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
 # Expor porta
 EXPOSE 8000
 
-# Script de inicialização com Xvfb
+# Copiar script de Chrome
+COPY --chown=appuser:appuser start_chrome.sh /app/start_chrome.sh
+RUN chmod +x /app/start_chrome.sh
+
+# Script de inicialização com Xvfb e Chrome
 RUN echo '#!/bin/bash\n\
 # Iniciar Xvfb em background\n\
 Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &\n\
 # Aguardar Xvfb inicializar\n\
 sleep 2\n\
+# Iniciar Chrome persistente\n\
+/app/start_chrome.sh\n\
+# Aguardar Chrome estar pronto\n\
+sleep 3\n\
 # Executar aplicação\n\
 exec python3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1\n\
 ' > /app/start.sh && chmod +x /app/start.sh
