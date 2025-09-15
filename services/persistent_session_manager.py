@@ -66,12 +66,13 @@ class PersistentSessionManager:
                 # Inicializar Playwright
                 self.playwright = await async_playwright().start()
                 
-                # Configurações do navegador com stealth
+                # Configurações do navegador com stealth para Docker
                 browser_args = [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
+                    '--disable-software-rasterizer',
                     '--disable-web-security',
                     '--disable-features=VizDisplayCompositor',
                     '--disable-blink-features=AutomationControlled',
@@ -89,16 +90,37 @@ class PersistentSessionManager:
                     '--no-zygote',
                     '--disable-ipc-flooding-protection',
                     '--disable-component-update',
-                    '--disable-default-apps',
                     '--disable-domain-reliability',
-                    '--disable-features=TranslateUI',
-                    '--disable-ipc-flooding-protection',
+                    '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+                    '--no-default-browser-check',
+                    # Correções específicas para Docker/container
+                    '--disable-crash-reporter',
+                    '--disable-breakpad',
+                    '--disable-logging',
+                    '--disable-dev-tools',
+                    '--disable-gpu-sandbox',
+                    '--disable-software-rasterizer',
+                    '--disable-background-networking',
+                    '--disable-default-apps',
+                    '--disable-extensions',
+                    '--disable-features=MediaRouter',
+                    '--disable-hang-monitor',
+                    '--disable-popup-blocking',
+                    '--disable-prompt-on-repost',
+                    '--disable-sync',
+                    '--disable-web-security',
                     '--no-default-browser-check',
                     '--no-first-run',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-renderer-backgrounding',
-                    '--disable-features=TranslateUI,BlinkGenPropertyTrees',
-                    '--disable-features=VizDisplayCompositor'
+                    '--disable-features=VizDisplayCompositor',
+                    # Limitar uso de recursos
+                    '--memory-pressure-off',
+                    '--max_old_space_size=4096',
+                    '--disable-field-trial-config',
+                    # Garantir que o crashpad não cause problemas
+                    '--disable-crash-reporter',
+                    '--crash-dumps-dir=/tmp',
+                    '--enable-logging=stderr',
+                    '--log-level=3'
                 ]
                 
                 # Usar contexto persistente
@@ -182,8 +204,86 @@ class PersistentSessionManager:
                 
             except Exception as e:
                 logger.error(f"❌ Erro ao inicializar sessão: {e}")
-                await self._cleanup_session()
-                return False
+                logger.info("🔄 Tentando inicialização alternativa sem contexto persistente...")
+                
+                # Tentar inicialização alternativa
+                try:
+                    await self._cleanup_session()
+                    return await self._initialize_alternative_mode()
+                except Exception as e2:
+                    logger.error(f"❌ Falha também no modo alternativo: {e2}")
+                    await self._cleanup_session()
+                    return False
+
+    async def _initialize_alternative_mode(self) -> bool:
+        """Modo alternativo de inicialização com configurações mais conservadoras"""
+        try:
+            logger.info("🔄 Iniciando modo alternativo...")
+            
+            # Inicializar Playwright novamente
+            self.playwright = await async_playwright().start()
+            
+            # Argumentos mais conservadores
+            minimal_args = [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--headless=new',
+                '--disable-crash-reporter',
+                '--disable-breakpad',
+                '--disable-logging',
+                '--no-first-run',
+                '--disable-default-apps',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-sync',
+                '--crash-dumps-dir=/tmp'
+            ]
+            
+            # Usar browser normal em vez de contexto persistente
+            browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=minimal_args
+            )
+            
+            self.context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+                viewport={'width': 1920, 'height': 1080},
+                locale='pt-BR',
+                timezone_id='America/Sao_Paulo',
+                extra_http_headers={
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+            )
+            
+            self.page = await self.context.new_page()
+            
+            # Aplicar stealth básico
+            await stealth_async(self.page)
+            
+            # Carregar cookies existentes
+            await self._load_initial_cookies()
+            
+            # Estabelecer sessão
+            await self._establish_youtube_session()
+            
+            # Marcar como ativa
+            self.is_active = True
+            self.is_healthy = True
+            self.session_start_time = datetime.now()
+            self.last_activity = datetime.now()
+            
+            logger.info("✅ Modo alternativo inicializado com sucesso!")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no modo alternativo: {e}")
+            return False
 
     async def _load_initial_cookies(self):
         """Carrega cookies iniciais se existirem"""
@@ -404,29 +504,79 @@ class PersistentSessionManager:
         return cookies
 
     def _write_netscape_cookies(self, cookies: List[Dict]):
-        """Escreve cookies no formato Netscape"""
+        """Escreve cookies no formato Netscape exato para yt-dlp"""
         try:
+            # Preservar cookies existentes importantes se já existem
+            existing_cookies = {}
+            if os.path.exists(self.cookie_filepath):
+                try:
+                    with open(self.cookie_filepath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.strip().startswith('#') or not line.strip():
+                                continue
+                            parts = line.strip().split('\t')
+                            if len(parts) == 7:
+                                cookie_key = f"{parts[0]}:{parts[5]}"  # domain:name
+                                existing_cookies[cookie_key] = line.strip()
+                except Exception as e:
+                    logger.debug(f"Erro ao ler cookies existentes: {e}")
+            
             with open(self.cookie_filepath, 'w', encoding='utf-8') as f:
+                # Escrever cabeçalho no formato exato
                 f.write("# Netscape HTTP Cookie File\n")
-                f.write("# Gerado por sessão persistente\n")
-                f.write(f"# Atualizado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"# Refresh count: {self.refresh_count}\n\n")
+                f.write("# http://curl.haxx.se/rfc/cookie_spec.html\n") 
+                f.write("# This is a generated file!  Do not edit.\n\n")
                 
+                # Processar cookies novos
+                new_cookies = {}
                 for cookie in cookies:
                     domain = cookie.get('domain', '')
+                    name = cookie.get('name', '')
+                    cookie_key = f"{domain}:{name}"
+                    
+                    # Formatação exata para yt-dlp
                     include_subdomains = "TRUE" if domain.startswith('.') else "FALSE"
                     secure = "TRUE" if cookie.get('secure', False) else "FALSE"
-                    expires = int(cookie.get('expires', 0)) if cookie.get('expires', -1) != -1 else 0
+                    expires = cookie.get('expires', 0)
+                    if expires == -1 or expires is None:
+                        expires = 0
+                    else:
+                        expires = int(expires)
                     
-                    f.write(
+                    cookie_line = (
                         f"{domain}\t"
                         f"{include_subdomains}\t"
                         f"{cookie.get('path', '/')}\t"
                         f"{secure}\t"
                         f"{expires}\t"
-                        f"{cookie.get('name', '')}\t"
-                        f"{cookie.get('value', '')}\n"
+                        f"{name}\t"
+                        f"{cookie.get('value', '')}"
                     )
+                    
+                    new_cookies[cookie_key] = cookie_line
+                
+                # Mesclar cookies existentes importantes com novos
+                all_cookies = {}
+                
+                # Primeiro, adicionar cookies existentes importantes
+                important_cookies = ['LOGIN_INFO', 'SID', '__Secure-1PSID', '__Secure-3PSID', 
+                                   'SAPISID', '__Secure-1PAPISID', '__Secure-3PAPISID']
+                
+                for cookie_key, cookie_line in existing_cookies.items():
+                    domain, name = cookie_key.split(':', 1)
+                    if name in important_cookies:
+                        all_cookies[cookie_key] = cookie_line
+                        logger.debug(f"Preservando cookie importante: {name}")
+                
+                # Depois, adicionar/atualizar com cookies novos
+                for cookie_key, cookie_line in new_cookies.items():
+                    all_cookies[cookie_key] = cookie_line
+                
+                # Escrever todos os cookies
+                for cookie_line in all_cookies.values():
+                    f.write(cookie_line + "\n")
+                
+                logger.info(f"💾 {len(all_cookies)} cookies salvos (preservando importantes)")
                     
         except Exception as e:
             logger.error(f"Erro ao escrever cookies: {e}")

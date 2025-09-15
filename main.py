@@ -135,8 +135,21 @@ async def startup_event():
             
             if session_ready:
                 logger.info("✅ Sessão persistente inicializada com sucesso!")
+                # Iniciar tasks em background se ainda não foram iniciados
+                if hasattr(session_manager, '_start_background_tasks'):
+                    session_manager._start_background_tasks()
             else:
-                logger.warning("⚠️ Falha na sessão persistente, usando modo fallback...")
+                logger.warning("⚠️ Falha na sessão persistente, usando modo fallback com cookies existentes...")
+                # Verificar se temos cookies válidos para o modo fallback
+                if os.path.exists("cookies.txt"):
+                    with open("cookies.txt", 'r') as f:
+                        cookie_content = f.read()
+                        if 'LOGIN_INFO' in cookie_content and 'SAPISID' in cookie_content:
+                            logger.info("🍪 Cookies de autenticação encontrados - modo fallback funcional")
+                        else:
+                            logger.warning("⚠️ Cookies podem estar desatualizados")
+                else:
+                    logger.warning("⚠️ Nenhum arquivo de cookies encontrado")
                 session_manager = None
         else:
             logger.info("🔄 Modo sessão persistente desabilitado")
