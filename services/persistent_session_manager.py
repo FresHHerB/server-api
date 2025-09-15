@@ -37,7 +37,7 @@ class PersistentSessionManager:
         self.refresh_count = 0
         
         # User agent rotator
-        self.ua = UserAgent(platforms=['windows'], browsers=['chrome'])
+        self.ua = UserAgent()
         self.current_user_agent = self.ua.chrome
         
         # Lock para operações concorrentes
