@@ -12,9 +12,6 @@ openai>=1.0.0
 # Playwright com stealth otimizado
 playwright==1.41.0
 playwright-stealth==1.0.6
-pyppeteer==1.0.2
-pyppeteer-stealth==2.7.4
-undetected-chromedriver==3.5.4
 
 # Utilitários essenciais
 python-dotenv==1.0.0
@@ -28,7 +25,6 @@ mutagen>=1.47.0
 websockets>=11.0
 certifi>=2023.11.17
 fake-useragent==1.4.0
-selenium-stealth==1.0.6
 
 # Processamento de dados
 numpy==1.24.4
