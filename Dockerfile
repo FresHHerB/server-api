@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
     git \
     # FFmpeg para processamento de áudio
     ffmpeg \
-    # Dependências do Playwright/Chromium
+    # Dependências COMPLETAS do Chromium para Ubuntu 20.04
     libnss3 \
     libnspr4 \
     libatk-bridge2.0-0 \
@@ -39,16 +39,62 @@ RUN apt-get update && apt-get install -y \
     libcairo-gobject2 \
     libgtk-3-0 \
     libgdk-pixbuf2.0-0 \
-    # Fontes para Ubuntu 20.04
+    # Dependências críticas que estavam faltando
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcb-dri3-0 \
+    libxcb-shm0 \
+    libxext6 \
+    libxi6 \
+    libxrender1 \
+    libxfixes3 \
+    libxcursor1 \
+    libxdamage1 \
+    libfontconfig1 \
+    libfreetype6 \
+    libdbus-1-3 \
+    libexpat1 \
+    libuuid1 \
+    # Libs adicionais para Chrome
+    libappindicator3-1 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libgconf-2-4 \
+    libgdk-pixbuf2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    # Fontes
     fonts-liberation \
     fonts-dejavu-core \
     fontconfig \
     # Xvfb para ambiente headless
     xvfb \
     # Dependências adicionais
-    libxrandr2 \
     libu2f-udev \
     libvulkan1 \
+    # Lib essencial que pode estar faltando
+    libgcc-s1 \
+    libc6-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -111,17 +157,25 @@ RUN if [ ! -f cookies.txt ]; then \
 # Mudar para usuário não-root
 USER appuser
 
-# Configurar variáveis de ambiente para Playwright Stealth
+# Configurar variáveis de ambiente para Chromium
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     DISPLAY=:99 \
-    PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW=1 \
-    CHROME_BIN=/ms-playwright/chromium-*/chrome-linux/chrome \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/ms-playwright/chromium-*/chrome-linux/chrome \
-    # Stealth específico
-    PLAYWRIGHT_STEALTH_MODE=1 \
+    # Variáveis críticas para evitar crash do Chrome
     CHROME_DEVEL_SANDBOX=false \
-    CHROME_NO_FIRST_RUN=true
+    CHROME_NO_FIRST_RUN=true \
+    GOOGLE_API_KEY="no" \
+    GOOGLE_DEFAULT_CLIENT_ID="no" \
+    GOOGLE_DEFAULT_CLIENT_SECRET="no" \
+    # Evitar crash relacionado a libs
+    LD_LIBRARY_PATH=/ms-playwright/chromium-*/chrome-linux \
+    # Configurações de memória
+    MALLOC_CHECK_=0 \
+    MALLOC_PERTURB_=0 \
+    # Disable crash reports
+    CHROME_CRASHPAD_PIPE_NAME="" \
+    BREAKPAD_DUMP_LOCATION="" \
+    # Force single process
+    CHROMIUM_FLAGS="--single-process --no-zygote"
 
 # Expor porta
 EXPOSE 8000

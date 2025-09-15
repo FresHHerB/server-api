@@ -22,22 +22,19 @@ echo "🔍 Chromium binary: $CHROMIUM_BIN"
 echo "🔧 Debug port: 9222"
 echo "📁 Data dir: /app/browser_profile"
 
-# Argumentos mínimos para Chromium em container
+# Argumentos SUPER MÍNIMOS para evitar crash
 CHROMIUM_ARGS="
 --no-sandbox
 --disable-dev-shm-usage
---headless=new
+--headless
+--remote-debugging-port=9222
+--user-data-dir=/app/browser_profile
 --disable-gpu
---no-first-run
+--single-process
+--no-zygote
 --disable-crash-reporter
 --disable-breakpad
---remote-debugging-port=9222
 --remote-allow-origins=*
---user-data-dir=/app/browser_profile
---disable-web-security
---disable-features=VizDisplayCompositor
---disable-software-rasterizer
---disable-background-timer-throttling
 "
 
 # Teste se binário é executável
