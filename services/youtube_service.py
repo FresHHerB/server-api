@@ -87,39 +87,14 @@ class YouTubeService:
         """
         output_template = os.path.join(self.temp_dir, f'{unique_id}.%(ext)s')
         
-        # Definir codec e qualidade baseado na compressão
-        if enable_compression:
-            # Usar Opus com compressão agressiva para máxima eficiência
-            postprocessors = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'opus',
-                'preferredquality': '32',  # Muito baixo para máxima compressão
-            }]
-            # Argumentos FFmpeg para compressão máxima
-            postprocessor_args = [
-                '-ar', '16000',  # 16kHz sample rate
-                '-ac', '1',      # Mono
-                '-c:a', 'libopus',
-                '-b:a', '12k',   # Bitrate muito baixo (12kbps)
-                '-application', 'voip',  # Otimizado para voz
-                '-compression_level', '10',  # Máxima compressão
-                '-vbr', 'on',    # Variable bitrate
-                '-cutoff', '8000'  # Cortar frequências acima de 8kHz
-            ]
-            if speed_up:
-                # Acelerar áudio em 2x
-                postprocessor_args.extend(['-af', 'atempo=2.0'])
-
-        else:
-            # Configuração padrão melhorada
-            postprocessors = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '128',  # Reduzido de 192 para 128
-            }]
-            postprocessor_args = ['-ar', '22050', '-ac', '1']  # Increased from 16kHz
-            if speed_up:
-                postprocessor_args.extend(['-af', 'atempo=2.0'])
+        # Sempre fazer download em MP3 padrão primeiro
+        # A compressão será aplicada após o download se necessário
+        postprocessors = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '128',
+        }]
+        postprocessor_args = ['-ar', '22050', '-ac', '1']  # Mono, 22kHz
 
         base_opts = {
             'format': 'bestaudio/best',
@@ -317,9 +292,8 @@ class YouTubeService:
                     logger.info(f"🎯 Tentativa {strategy_index + 1}/{len(strategies)} - Estratégia: {strategy}")
                     
                     unique_id = str(uuid.uuid4())[:8]
-                    # Extensão do arquivo baseada na compressão
-                    file_extension = "opus" if enable_compression else "mp3"
-                    final_audio_path = os.path.join(self.temp_dir, f"{unique_id}.{file_extension}")
+                    # Sempre baixar como MP3 primeiro
+                    final_audio_path = os.path.join(self.temp_dir, f"{unique_id}.mp3")
                     ydl_opts = self._get_yt_dlp_options(unique_id, strategy, enable_compression, speed_up)
 
                     logger.info(f"🔽 Baixando áudio com estratégia '{strategy}'...")
@@ -354,6 +328,15 @@ class YouTubeService:
                     logger.info(f"🎯 Estratégia: {strategy}")
                     logger.info(f"🗜️ Compressão: {'Ativa' if enable_compression else 'Padrão'}")
                     logger.info(f"⚡ Velocidade: {'2x' if speed_up else '1x'}")
+
+                    # Aplicar compressão pós-download se necessário
+                    if enable_compression or speed_up:
+                        logger.info("🔄 Aplicando compressão pós-download...")
+                        final_audio_path = await self._post_download_compression(
+                            final_audio_path, unique_id, enable_compression, speed_up
+                        )
+                        file_size = os.path.getsize(final_audio_path) / (1024 * 1024)
+                        logger.info(f"📊 Tamanho após compressão: {file_size:.2f}MB")
 
                     # Verificar se ainda está muito grande e aplicar compressão de emergência
                     if file_size > 24:  # Muito próximo do limite
@@ -412,6 +395,71 @@ class YouTubeService:
             else:
                 raise
 
+    async def _post_download_compression(self, audio_path: str, unique_id: str, enable_compression: bool, speed_up: bool) -> str:
+        """
+        Aplica compressão após o download usando formatos suportados pela OpenAI
+        """
+        try:
+            if enable_compression:
+                # Usar OGG Vorbis (suportado pela OpenAI)
+                compressed_path = os.path.join(self.temp_dir, f"{unique_id}_compressed.ogg")
+
+                # Comando ffmpeg para compressão com OGG Vorbis
+                cmd = [
+                    'ffmpeg', '-y',  # Forçar overwrite
+                    '-i', audio_path,
+                    '-vn',  # Sem vídeo
+                    '-map_metadata', '-1',  # Remover metadados
+                    '-ac', '1',  # Mono
+                    '-ar', '16000',  # Sample rate 16kHz
+                    '-c:a', 'libvorbis',  # Codec Vorbis
+                    '-q:a', '0',  # Qualidade baixa (equivalente ~64kbps)
+                ]
+
+                if speed_up:
+                    cmd.extend(['-af', 'atempo=2.0'])  # Acelerar 2x
+
+                cmd.append(compressed_path)
+
+            else:
+                # Apenas acelerar sem compressão adicional
+                compressed_path = os.path.join(self.temp_dir, f"{unique_id}_speed.mp3")
+
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', audio_path,
+                    '-vn',
+                    '-ac', '1',  # Mono
+                    '-ar', '22050',  # Manter sample rate
+                    '-b:a', '96k',  # Bitrate um pouco menor
+                    '-af', 'atempo=2.0',  # Acelerar 2x
+                    compressed_path
+                ]
+
+            logger.info(f"🔧 Executando compressão: {'OGG+aceleração' if enable_compression and speed_up else 'OGG' if enable_compression else 'MP3+aceleração'}")
+
+            result = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await result.communicate()
+
+            if result.returncode != 0:
+                logger.error(f"❌ Erro na compressão pós-download: {stderr.decode()}")
+                return audio_path  # Retorna o original
+
+            # Remover arquivo original
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+
+            return compressed_path
+
+        except Exception as e:
+            logger.error(f"❌ Falha na compressão pós-download: {e}")
+            return audio_path  # Retorna o original em caso de erro
+
     async def _emergency_compression(self, audio_path: str, unique_id: str) -> str:
         """
         Aplica compressão extrema para arquivos que ainda estão muito grandes
@@ -419,10 +467,10 @@ class YouTubeService:
         try:
             import subprocess
 
-            # Novo arquivo com compressão máxima
-            compressed_path = os.path.join(self.temp_dir, f"{unique_id}_compressed.opus")
+            # Novo arquivo com compressão máxima usando OGG Vorbis
+            compressed_path = os.path.join(self.temp_dir, f"{unique_id}_emergency.ogg")
 
-            # Comando ffmpeg para compressão extrema
+            # Comando ffmpeg para compressão extrema com Vorbis
             cmd = [
                 'ffmpeg', '-y',  # Forçar overwrite
                 '-i', audio_path,
@@ -430,10 +478,8 @@ class YouTubeService:
                 '-map_metadata', '-1',  # Remover metadados
                 '-ac', '1',  # Mono
                 '-ar', '12000',  # Sample rate muito baixo (12kHz)
-                '-c:a', 'libopus',
-                '-b:a', '8k',  # Bitrate extremamente baixo (8kbps)
-                '-application', 'voip',
-                '-compression_level', '10',
+                '-c:a', 'libvorbis',
+                '-q:a', '-1',  # Qualidade mínima (~32kbps)
                 '-af', 'atempo=2.5',  # Acelerar ainda mais (2.5x)
                 compressed_path
             ]
@@ -469,7 +515,7 @@ class YouTubeService:
             # Usar compressão máxima na tentativa final
             enable_compression, speed_up = True, True
             unique_id = str(uuid.uuid4())[:8]
-            final_audio_path = os.path.join(self.temp_dir, f"{unique_id}.opus")
+            final_audio_path = os.path.join(self.temp_dir, f"{unique_id}.mp3")
             ydl_opts = self._get_yt_dlp_options(unique_id, "stealth", enable_compression, speed_up)
             
             logger.info(f"🔄 Tentativa final de download: {video_url}")
@@ -493,9 +539,16 @@ class YouTubeService:
                 if not os.path.exists(final_audio_path):
                     raise Exception(f"Arquivo não criado na tentativa final: {final_audio_path}")
             
+            # Aplicar compressão pós-download na tentativa final
+            if enable_compression or speed_up:
+                logger.info("🔄 Aplicando compressão na tentativa final...")
+                final_audio_path = await self._post_download_compression(
+                    final_audio_path, unique_id, enable_compression, speed_up
+                )
+
             file_size = os.path.getsize(final_audio_path) / (1024 * 1024)
             logger.info(f"✅ Tentativa final bem-sucedida: '{video_title}' ({file_size:.2f}MB)")
-            
+
             return final_audio_path, video_title
             
         except Exception as e:
