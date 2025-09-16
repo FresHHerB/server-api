@@ -238,20 +238,13 @@ class YouTubeService:
 
             logger.info(f"📊 Duração estimada: {duration_minutes:.1f}min, tamanho estimado: {estimated_size_mb:.1f}MB")
 
-            # Decisão baseada no tamanho estimado
-            if estimated_size_mb > 20:  # Muito próximo do limite de 25MB
-                logger.info("🔥 Vídeo longo detectado - usando compressão máxima + aceleração 2x")
-                return True, True  # Compressão + velocidade 2x
-            elif estimated_size_mb > 10:
-                logger.info("⚡ Vídeo médio detectado - usando compressão")
-                return True, False  # Apenas compressão
-            else:
-                logger.info("✅ Vídeo curto detectado - configuração padrão")
-                return False, False  # Configuração padrão
+            # Sempre aplicar compressão + velocidade 2x para máxima otimização
+            logger.info(f"🚀 Aplicando sempre: compressão OGG 12k + velocidade 2x (duração: {duration_minutes:.1f}min)")
+            return True, True  # Sempre compressão + velocidade 2x
 
         except Exception as e:
-            logger.warning(f"⚠️ Erro ao estimar tamanho: {e}, usando compressão por segurança")
-            return True, False
+            logger.warning(f"⚠️ Erro ao estimar tamanho: {e}, usando compressão padrão + velocidade 2x")
+            return True, True  # Sempre usar compressão + velocidade 2x quando não conseguir estimar
 
     async def download_audio(self, video_url: str) -> Tuple[str, str]:
         """
@@ -404,7 +397,7 @@ class YouTubeService:
                 # Usar OGG Vorbis (suportado pela OpenAI)
                 compressed_path = os.path.join(self.temp_dir, f"{unique_id}_compressed.ogg")
 
-                # Comando ffmpeg para compressão com OGG Vorbis
+                # Comando ffmpeg para compressão com OGG Vorbis 12k
                 cmd = [
                     'ffmpeg', '-y',  # Forçar overwrite
                     '-i', audio_path,
@@ -413,7 +406,7 @@ class YouTubeService:
                     '-ac', '1',  # Mono
                     '-ar', '16000',  # Sample rate 16kHz
                     '-c:a', 'libvorbis',  # Codec Vorbis
-                    '-q:a', '0',  # Qualidade baixa (equivalente ~64kbps)
+                    '-b:a', '12k',  # Bitrate 12kbps
                 ]
 
                 if speed_up:
@@ -436,7 +429,7 @@ class YouTubeService:
                     compressed_path
                 ]
 
-            logger.info(f"🔧 Executando compressão: {'OGG+aceleração' if enable_compression and speed_up else 'OGG' if enable_compression else 'MP3+aceleração'}")
+            logger.info(f"🔧 Executando compressão: {'OGG 12k+aceleração 2x' if enable_compression and speed_up else 'OGG 12k' if enable_compression else 'MP3+aceleração 2x'}")
 
             result = await asyncio.create_subprocess_exec(
                 *cmd,
