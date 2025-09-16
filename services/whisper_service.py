@@ -149,12 +149,12 @@ class WhisperService:
                 }
                 data = {
                     'model': self.model,
-                    'language': 'pt',  # Português
+                    # Remover 'language' para detecção automática do idioma original
                     'response_format': 'text'
                 }
                 
                 # Fazer requisição à API com retry
-                logger.info("🔄 Processando transcrição via OpenAI...")
+                logger.info("🔄 Processando transcrição via OpenAI (detecção automática de idioma)...")
                 response = await self._make_transcription_request(audio_path, headers, data, files)
                 
                 # Verificar se a resposta foi bem-sucedida
