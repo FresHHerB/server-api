@@ -203,49 +203,6 @@ class YouTubeService:
 
         return base_opts
 
-    async def _estimate_file_size_and_choose_compression(self, video_url: str) -> tuple[bool, bool]:
-        """
-        Estima duração do vídeo e decide se usar compressão/aceleração
-
-        Returns:
-            tuple: (enable_compression, speed_up)
-        """
-        try:
-            # Extrair info sem baixar
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'skip_download': True
-            }
-
-            loop = asyncio.get_event_loop()
-            info_dict = await loop.run_in_executor(
-                None,
-                lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(video_url, download=False)
-            )
-
-            duration = info_dict.get('duration', 0)  # em segundos
-            if duration == 0:
-                logger.warning("⚠️ Duração não detectada, usando compressão padrão")
-                return True, False
-
-            # Estimativas aproximadas de tamanho do arquivo:
-            # MP3 128kbps mono: ~1MB por minuto
-            # Opus 12kbps: ~0.09MB por minuto
-
-            duration_minutes = duration / 60
-            estimated_size_mb = duration_minutes * 1.0  # MP3 128kbps mono
-
-            logger.info(f"📊 Duração estimada: {duration_minutes:.1f}min, tamanho estimado: {estimated_size_mb:.1f}MB")
-
-            # Sempre aplicar compressão + velocidade 2x para máxima otimização
-            logger.info(f"🚀 Aplicando sempre: compressão OGG 12k + velocidade 2x (duração: {duration_minutes:.1f}min)")
-            return True, True  # Sempre compressão + velocidade 2x
-
-        except Exception as e:
-            logger.warning(f"⚠️ Erro ao estimar tamanho: {e}, usando compressão padrão + velocidade 2x")
-            return True, True  # Sempre usar compressão + velocidade 2x quando não conseguir estimar
-
     async def download_audio(self, video_url: str) -> Tuple[str, str]:
         """
         Baixa áudio com sessão persistente ativa
@@ -274,8 +231,9 @@ class YouTubeService:
                 else:
                     logger.warning("⚠️ Problema com sessão persistente, continuando...")
 
-            # Estimar tamanho e escolher configuração de compressão
-            enable_compression, speed_up = await self._estimate_file_size_and_choose_compression(video_url)
+            # Sempre aplicar compressão OGG + velocidade 2x para máxima otimização
+            enable_compression, speed_up = True, True
+            logger.info("🚀 Configuração: compressão OGG + velocidade 2x (sempre aplicada)")
 
             # Estratégias de download em ordem de prioridade
             strategies = ["default", "mobile", "aggressive", "stealth"]
@@ -397,7 +355,7 @@ class YouTubeService:
                 # Usar OGG Vorbis (suportado pela OpenAI)
                 compressed_path = os.path.join(self.temp_dir, f"{unique_id}_compressed.ogg")
 
-                # Comando ffmpeg para compressão com OGG Vorbis 12k
+                # Comando ffmpeg para compressão com OGG Vorbis
                 cmd = [
                     'ffmpeg', '-y',  # Forçar overwrite
                     '-i', audio_path,
@@ -406,7 +364,7 @@ class YouTubeService:
                     '-ac', '1',  # Mono
                     '-ar', '16000',  # Sample rate 16kHz
                     '-c:a', 'libvorbis',  # Codec Vorbis
-                    '-b:a', '12k',  # Bitrate 12kbps
+                    '-q:a', '1',  # Qualidade baixa (~45kbps) - mais compatível que bitrate fixo
                 ]
 
                 if speed_up:
@@ -429,7 +387,7 @@ class YouTubeService:
                     compressed_path
                 ]
 
-            logger.info(f"🔧 Executando compressão: {'OGG 12k+aceleração 2x' if enable_compression and speed_up else 'OGG 12k' if enable_compression else 'MP3+aceleração 2x'}")
+            logger.info(f"🔧 Executando compressão: {'OGG baixa qualidade+aceleração 2x' if enable_compression and speed_up else 'OGG baixa qualidade' if enable_compression else 'MP3+aceleração 2x'}")
 
             result = await asyncio.create_subprocess_exec(
                 *cmd,
