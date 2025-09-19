@@ -24,6 +24,9 @@ mutagen>=1.47.0
 websockets>=11.0
 certifi>=2023.11.17
 
+# Processamento de áudio (chunking)
+pydub>=0.25.1
+
 # Processamento de dados
 numpy==1.24.4
 
