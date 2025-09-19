@@ -13,7 +13,7 @@ class BackgroundBrowser:
     """
     Navegador que roda em background independente da API
     - Mantém sessão YouTube sempre ativa
-    - Refresh a cada 10 segundos  
+    - Refresh configurável via BROWSER_REFRESH_INTERVAL (padrão: 10s)
     - Atualiza cookies.txt automaticamente
     - Não interfere na API
     """
@@ -21,7 +21,7 @@ class BackgroundBrowser:
     def __init__(self, cookie_filepath: str = "cookies.txt"):
         self.cookie_filepath = cookie_filepath
         self.debug_port = 9222
-        self.refresh_interval = 10  # segundos
+        self.refresh_interval = int(os.getenv("BROWSER_REFRESH_INTERVAL", "10"))  # segundos
         
         # Lock para evitar conflito de arquivo
         self.cookie_lock = threading.Lock()
@@ -92,7 +92,7 @@ class BackgroundBrowser:
             self.start_time = datetime.now()
             
             logger.info("✅ BackgroundBrowser ativo!")
-            logger.info("🔄 Iniciando loop de refresh a cada 10s...")
+            logger.info(f"🔄 Iniciando loop de refresh a cada {self.refresh_interval}s...")
             
             # Iniciar loop de refresh em background
             asyncio.create_task(self._refresh_loop())
@@ -105,7 +105,7 @@ class BackgroundBrowser:
             return False
 
     async def _refresh_loop(self):
-        """Loop infinito que faz refresh a cada 10 segundos"""
+        """Loop infinito que faz refresh baseado no intervalo configurado"""
         while self.is_running:
             try:
                 await asyncio.sleep(self.refresh_interval)

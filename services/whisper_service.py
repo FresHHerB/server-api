@@ -4,7 +4,10 @@ import httpx
 import aiofiles
 import asyncio
 import random
-from typing import Optional
+import math
+from typing import Optional, List, Tuple
+from pydub import AudioSegment
+from pydub.utils import make_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +22,85 @@ class WhisperService:
 
         self.api_url = "https://api.openai.com/v1/audio/transcriptions"
         self.model = os.getenv("WHISPER_API_MODEL", "whisper-1")
+
+        # Configurações de timeout e chunking
+        self.request_timeout = float(os.getenv("WHISPER_TIMEOUT", "600.0"))  # 10 minutos
+        self.max_duration_seconds = float(os.getenv("WHISPER_CHUNK_DURATION_SECONDS", "1500.0"))  # 25 minutos (1500s)
+
         self.client = httpx.AsyncClient(
-            timeout=300.0,  # 5 minutos
+            timeout=self.request_timeout,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
         )
 
         self.max_retries = int(os.getenv("WHISPER_MAX_RETRIES", "3"))
         self.base_delay = float(os.getenv("WHISPER_RETRY_DELAY", "2.0"))
 
-        logger.info(f"🎤 WhisperService inicializado (modelo: {self.model}, max_retries: {self.max_retries})")
+        logger.info(f"🎤 WhisperService inicializado (modelo: {self.model}, max_retries: {self.max_retries}, timeout: {self.request_timeout}s, chunk_duration: {self.max_duration_seconds}s)")
+
+    def _get_audio_duration(self, audio_path: str) -> float:
+        """
+        Obtém a duração do áudio em segundos
+
+        Returns:
+            float: Duração em segundos
+        """
+        try:
+            audio = AudioSegment.from_file(audio_path)
+            duration_seconds = len(audio) / 1000.0  # pydub retorna em ms
+            logger.info(f"🕒 Duração do áudio: {duration_seconds:.2f} segundos ({duration_seconds/60:.2f} minutos)")
+            return duration_seconds
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao detectar duração do áudio: {e}")
+            return 0.0
+
+    def _split_audio_by_duration(self, audio_path: str, max_duration_seconds: float) -> List[str]:
+        """
+        Divide o áudio em chunks baseado na duração
+
+        Args:
+            audio_path: Caminho do arquivo de áudio
+            max_duration_seconds: Duração máxima por chunk em segundos
+
+        Returns:
+            List[str]: Lista de caminhos dos arquivos de chunk
+        """
+        try:
+            audio = AudioSegment.from_file(audio_path)
+            total_duration_ms = len(audio)
+            max_duration_ms = int(max_duration_seconds * 1000)  # Converter para ms
+
+            chunk_paths = []
+            base_name = os.path.splitext(audio_path)[0]
+
+            # Se o áudio é menor que o limite, retorna o arquivo original
+            if total_duration_ms <= max_duration_ms:
+                logger.info(f"🔊 Áudio não precisa ser dividido ({total_duration_ms/1000:.2f}s / {total_duration_ms/60000:.2f}min)")
+                return [audio_path]
+
+            # Calcular número de chunks necessários
+            num_chunks = math.ceil(total_duration_ms / max_duration_ms)
+            logger.info(f"✂️ Dividindo áudio em {num_chunks} chunks de ~{max_duration_seconds}s ({max_duration_seconds/60:.2f}min)")
+
+            for i in range(num_chunks):
+                start_time = i * max_duration_ms
+                end_time = min((i + 1) * max_duration_ms, total_duration_ms)
+
+                chunk = audio[start_time:end_time]
+                chunk_path = f"{base_name}_chunk_{i+1:02d}.ogg"
+
+                # Exportar chunk
+                chunk.export(chunk_path, format="ogg", codec="libvorbis")
+                chunk_paths.append(chunk_path)
+
+                chunk_duration_s = (end_time - start_time) / 1000  # Converter para segundos
+                chunk_duration_min = chunk_duration_s / 60  # Converter para minutos
+                logger.info(f"📄 Chunk {i+1}/{num_chunks} criado: {chunk_duration_s:.2f}s ({chunk_duration_min:.2f}min)")
+
+            return chunk_paths
+
+        except Exception as e:
+            logger.error(f"❌ Erro ao dividir áudio: {e}")
+            return [audio_path]  # Fallback para arquivo original
 
     def _validate_audio_file(self, audio_path: str) -> tuple[bool, str]:
         """
@@ -44,10 +117,10 @@ class WhisperService:
             if file_size == 0:
                 return False, "Arquivo de áudio está vazio"
 
-            # OpenAI limite: 25MB
+            # OpenAI limite: 25MB (mas vamos permitir pois faremos chunking)
             max_size = 25 * 1024 * 1024  # 25MB
             if file_size > max_size:
-                return False, f"Arquivo muito grande ({file_size / (1024*1024):.2f}MB). Limite: 25MB"
+                logger.warning(f"⚠️ Arquivo grande ({file_size / (1024*1024):.2f}MB), mas será dividido em chunks")
 
             # Verificar se é um arquivo de áudio válido (básico)
             with open(audio_path, 'rb') as f:
@@ -113,9 +186,9 @@ class WhisperService:
 
         return response
 
-    async def transcribe(self, audio_path: str) -> str:
+    async def _transcribe_single_file(self, audio_path: str) -> str:
         """
-        Transcreve arquivo de áudio via API OpenAI
+        Transcreve um único arquivo de áudio via API OpenAI
 
         Args:
             audio_path: Caminho para o arquivo de áudio
@@ -126,12 +199,6 @@ class WhisperService:
         Raises:
             Exception: Se houver erro na transcrição
         """
-        # Validar arquivo antes do envio
-        is_valid, error_msg = self._validate_audio_file(audio_path)
-        if not is_valid:
-            logger.error(f"❌ Validação falhou: {error_msg}")
-            raise ValueError(f"Arquivo inválido: {error_msg}")
-
         file_size = os.path.getsize(audio_path) / (1024 * 1024)  # MB
         logger.info(f"📤 Enviando arquivo para OpenAI ({file_size:.2f}MB)...")
 
@@ -233,17 +300,83 @@ class WhisperService:
             else:
                 raise Exception(f"Erro na API da OpenAI: {e.response.status_code} - {error_message or error_details}")
                 
+            
         except httpx.TimeoutException:
             logger.error("❌ Timeout na requisição para OpenAI")
             raise Exception("Timeout na transcrição - arquivo muito grande ou API lenta.")
-            
+
         except Exception as e:
             logger.error(f"❌ Erro inesperado na transcrição: {str(e)}")
             raise Exception(f"Falha na transcrição: {str(e)}")
-            
+
+    async def transcribe(self, audio_path: str) -> str:
+        """
+        Transcreve arquivo de áudio via API OpenAI com suporte a chunking para arquivos longos
+
+        Args:
+            audio_path: Caminho para o arquivo de áudio
+
+        Returns:
+            str: Texto transcrito
+
+        Raises:
+            Exception: Se houver erro na transcrição
+        """
+        chunk_files = []
+        try:
+            # Validar arquivo antes do envio
+            is_valid, error_msg = self._validate_audio_file(audio_path)
+            if not is_valid:
+                logger.error(f"❌ Validação falhou: {error_msg}")
+                raise ValueError(f"Arquivo inválido: {error_msg}")
+
+            # Verificar duração do áudio
+            duration_seconds = self._get_audio_duration(audio_path)
+
+            # Se a duração é maior que o limite, dividir em chunks
+            if duration_seconds > self.max_duration_seconds:
+                logger.info(f"🔴 Áudio longo detectado ({duration_seconds:.2f}s ({duration_seconds/60:.2f}min) > {self.max_duration_seconds}s ({self.max_duration_seconds/60:.2f}min))")
+                logger.info(f"✂️ Dividindo em chunks de {self.max_duration_seconds}s ({self.max_duration_seconds/60:.2f}min)...")
+
+                chunk_files = self._split_audio_by_duration(audio_path, self.max_duration_seconds)
+
+                if len(chunk_files) == 1:
+                    # Não foi dividido, usar arquivo original
+                    logger.info("🔊 Usando arquivo original (chunk único)")
+                    transcription = await self._transcribe_single_file(audio_path)
+                else:
+                    # Transcrever cada chunk e concatenar
+                    logger.info(f"📋 Transcrevendo {len(chunk_files)} chunks...")
+                    transcriptions = []
+
+                    for i, chunk_path in enumerate(chunk_files, 1):
+                        logger.info(f"🎤 Transcrevendo chunk {i}/{len(chunk_files)}...")
+                        chunk_transcription = await self._transcribe_single_file(chunk_path)
+
+                        if chunk_transcription.strip():
+                            transcriptions.append(chunk_transcription.strip())
+                            logger.info(f"✅ Chunk {i} transcrito ({len(chunk_transcription)} caracteres)")
+                        else:
+                            logger.warning(f"⚠️ Chunk {i} retornou transcrição vazia")
+
+                    # Concatenar todas as transcrições
+                    transcription = " ".join(transcriptions)
+                    logger.info(f"🔗 Transcrições concatenadas ({len(transcription)} caracteres total)")
+            else:
+                # Áudio dentro do limite, transcrever diretamente
+                logger.info(f"🔊 Áudio dentro do limite ({duration_seconds:.2f}s / {duration_seconds/60:.2f}min)")
+                transcription = await self._transcribe_single_file(audio_path)
+
+            return transcription
+
         finally:
-            # Limpar arquivo após transcrição
+            # Limpar arquivo original
             self._cleanup_audio_file(audio_path)
+
+            # Limpar arquivos de chunk
+            for chunk_file in chunk_files:
+                if chunk_file != audio_path:  # Não remover o arquivo original duas vezes
+                    self._cleanup_audio_file(chunk_file)
 
     def _cleanup_audio_file(self, audio_path: str):
         """Remove arquivo de áudio após processamento"""
@@ -276,7 +409,11 @@ class WhisperService:
             "model": self.model,
             "api_url": self.api_url,
             "api_key_configured": bool(self.api_key),
-            "client_configured": self.client is not None
+            "client_configured": self.client is not None,
+            "timeout_seconds": self.request_timeout,
+            "chunk_duration_seconds": self.max_duration_seconds,
+            "chunking_enabled": True,
+            "max_file_size_mb": 25
         }
 
     async def cleanup(self):

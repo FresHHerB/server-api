@@ -11,6 +11,8 @@ Uma API REST moderna e robusta para transcrever vídeos do YouTube usando OpenAI
 - 📊 **Logging**: Sistema completo de logs
 - 🔄 **Assíncrono**: Processamento não-bloqueante
 - 🧹 **Auto-limpeza**: Remove arquivos temporários automaticamente
+- ✂️ **Chunking Inteligente**: Divide áudios longos automaticamente
+- 🍪 **Cookies Dinâmicos**: Refresh automático para sessões estáveis
 
 ## 📋 Pré-requisitos
 
@@ -210,11 +212,34 @@ youtube-transcription-api/
 
 ### Variáveis de Ambiente Disponíveis
 
+#### 🔐 **Autenticação**
 | Variável | Descrição | Padrão |
 |----------|-----------|---------|
 | `API_TOKEN` | Token de autenticação (obrigatório) | - |
+
+#### 🎤 **OpenAI Whisper**
+| Variável | Descrição | Padrão |
+|----------|-----------|---------|
+| `OPENAI_API_KEY` | Chave da API OpenAI (obrigatória) | - |
+| `WHISPER_API_MODEL` | Modelo Whisper API | whisper-1 |
+| `WHISPER_TIMEOUT` | Timeout para transcrições (segundos) | 600.0 |
+| `WHISPER_MAX_RETRIES` | Máximo de tentativas | 3 |
+| `WHISPER_RETRY_DELAY` | Delay entre tentativas (segundos) | 2.0 |
+| `WHISPER_CHUNK_DURATION_SECONDS` | Duração máxima por chunk (segundos) | 1500.0 |
+
+> **💡 Chunking de Áudio**: Áudios maiores que o limite configurado são automaticamente divididos em chunks menores, transcritos separadamente e depois concatenados, resolvendo problemas de timeout com vídeos longos.
+
+#### 🌐 **Navegador e Cookies**
+| Variável | Descrição | Padrão |
+|----------|-----------|---------|
+| `BROWSER_REFRESH_INTERVAL` | Intervalo de refresh dos cookies (segundos) | 10 |
+
+> **🍪 Cookies Dinâmicos**: O navegador em background atualiza automaticamente os cookies do YouTube no intervalo configurado, mantendo sessões ativas e evitando bloqueios.
+
+#### ⚙️ **Servidor**
+| Variável | Descrição | Padrão |
+|----------|-----------|---------|
 | `PORT` | Porta do servidor | 8000 |
-| `WHISPER_MODEL` | Modelo Whisper (tiny, small, medium, large) | medium |
 | `LOG_LEVEL` | Nível de log (DEBUG, INFO, WARNING, ERROR) | INFO |
 | `MAX_VIDEOS_PER_REQUEST` | Máximo de vídeos por requisição | 10 |
 
